@@ -84,10 +84,15 @@ def register_font(
 PDF_FONT_REGULAR = register_font(
     internal_name="EntoLabelRegular",
     possible_paths=[
+        # Linux / Streamlit Cloud
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+
+        # macOS
         "/System/Library/Fonts/Supplemental/Arial.ttf",
         "/Library/Fonts/Arial.ttf",
         "/System/Library/Fonts/Supplemental/Helvetica.ttf",
-        "/System/Library/Fonts/Supplemental/Times New Roman.ttf",
     ],
     fallback_name="Helvetica",
 )
@@ -95,10 +100,15 @@ PDF_FONT_REGULAR = register_font(
 PDF_FONT_ITALIC = register_font(
     internal_name="EntoLabelItalic",
     possible_paths=[
+        # Linux / Streamlit Cloud
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf",
+        "/usr/share/fonts/truetype/liberation2/LiberationSans-Italic.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Italic.ttf",
+
+        # macOS
         "/System/Library/Fonts/Supplemental/Arial Italic.ttf",
         "/Library/Fonts/Arial Italic.ttf",
         "/System/Library/Fonts/Supplemental/Helvetica Oblique.ttf",
-        "/System/Library/Fonts/Supplemental/Times New Roman Italic.ttf",
     ],
     fallback_name="Helvetica-Oblique",
 )
@@ -106,10 +116,15 @@ PDF_FONT_ITALIC = register_font(
 PDF_FONT_BOLD = register_font(
     internal_name="EntoLabelBold",
     possible_paths=[
+        # Linux / Streamlit Cloud
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+
+        # macOS
         "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
         "/Library/Fonts/Arial Bold.ttf",
         "/System/Library/Fonts/Supplemental/Helvetica Bold.ttf",
-        "/System/Library/Fonts/Supplemental/Times New Roman Bold.ttf",
     ],
     fallback_name="Helvetica-Bold",
 )
