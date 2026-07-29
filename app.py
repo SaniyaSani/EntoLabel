@@ -2896,7 +2896,7 @@ with st.expander(
     ).encode("utf-8-sig")
 
     st.download_button(
-        label="🌿 Download Darwin Core CSV",
+        label="Download Darwin Core CSV",
         data=darwin_core_csv,
         file_name="entolabel_darwin_core.csv",
         mime="text/csv",
