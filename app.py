@@ -4,6 +4,7 @@ from datetime import date, datetime, time
 from html import escape
 from io import BytesIO
 from pathlib import Path
+import re
 from typing import Any
 
 import pandas as pd
@@ -189,6 +190,80 @@ def combine_columns(
 
 
 # =========================================================
+# EXCEL ROW RANGE PARSING
+# =========================================================
+
+def parse_excel_row_ranges(
+    range_text: str,
+    minimum_row: int,
+    maximum_row: int,
+) -> tuple[list[int], list[str]]:
+    """Parse entries such as ``10-20, 34, 41-56``.
+
+    The returned row numbers are unique and keep the order in which
+    the ranges were entered. Both ends of every range are included.
+    """
+
+    cleaned_text = (
+        range_text
+        .replace("–", "-")
+        .replace("—", "-")
+        .replace(";", ",")
+        .replace("\n", ",")
+    )
+
+    parts = [
+        part.strip()
+        for part in cleaned_text.split(",")
+        if part.strip()
+    ]
+
+    if not parts:
+        return [], ["Enter at least one Excel row or row range."]
+
+    selected_rows: list[int] = []
+    seen_rows: set[int] = set()
+    errors: list[str] = []
+
+    for part in parts:
+        single_match = re.fullmatch(r"\d+", part)
+        range_match = re.fullmatch(r"(\d+)\s*-\s*(\d+)", part)
+
+        if single_match:
+            start_row = end_row = int(part)
+        elif range_match:
+            start_row = int(range_match.group(1))
+            end_row = int(range_match.group(2))
+
+            if start_row > end_row:
+                errors.append(
+                    f'Range "{part}" runs backwards. '
+                    "Put the smaller row number first."
+                )
+                continue
+        else:
+            errors.append(
+                f'Could not understand "{part}". '
+                "Use formats such as 10-20 or 34."
+            )
+            continue
+
+        if start_row < minimum_row or end_row > maximum_row:
+            errors.append(
+                f'"{part}" is outside the available data rows '
+                f"{minimum_row}-{maximum_row}."
+            )
+            continue
+
+        for excel_row in range(start_row, end_row + 1):
+            if excel_row not in seen_rows:
+                selected_rows.append(excel_row)
+                seen_rows.add(excel_row)
+
+    return selected_rows, errors
+
+
+# =========================================================
 # DATE FORMATTING
 # =========================================================
 
@@ -318,6 +393,99 @@ def format_people(
         ]
 
     return ", ".join(people)
+
+
+def normalize_sex(value: Any) -> str:
+    """Convert common sex values to compact biological symbols."""
+
+    text = clean_value(value)
+
+    if not text:
+        return ""
+
+    normalized = re.sub(r"[._-]+", " ", text.lower()).strip()
+
+    male_values = {
+        "m",
+        "male",
+        "mannlich",
+        "männlich",
+        "masculine",
+        "♂",
+    }
+    female_values = {
+        "f",
+        "female",
+        "weiblich",
+        "feminine",
+        "♀",
+    }
+
+    if normalized in male_values:
+        return "♂"
+
+    if normalized in female_values:
+        return "♀"
+
+    return text
+
+
+def build_additional_specimen_lines(
+    row: pd.Series,
+    collecting_method_column: str,
+    habitat_column: str,
+    host_column: str,
+    sex_column: str,
+    life_stage_column: str,
+    layout: str,
+    separator: str,
+) -> list[dict[str, str]]:
+    """Build optional method, ecology, sex, and life-stage text."""
+
+    collecting_method = get_value(row, collecting_method_column)
+    habitat = get_value(row, habitat_column)
+    host = get_value(row, host_column)
+    sex = normalize_sex(get_value(row, sex_column))
+    life_stage = get_value(row, life_stage_column)
+
+    labelled_parts: list[str] = []
+
+    if collecting_method:
+        labelled_parts.append(f"method: {collecting_method}")
+
+    if habitat:
+        labelled_parts.append(f"hab.: {habitat}")
+
+    if host:
+        labelled_parts.append(f"host: {host}")
+
+    specimen_state = " ".join(
+        part
+        for part in (sex, life_stage)
+        if part
+    )
+
+    if specimen_state:
+        labelled_parts.append(specimen_state)
+
+    if not labelled_parts:
+        return []
+
+    if layout == "Separate line for each field":
+        return [
+            {
+                "text": part,
+                "style": "regular",
+            }
+            for part in labelled_parts
+        ]
+
+    return [
+        {
+            "text": separator.join(labelled_parts),
+            "style": "regular",
+        }
+    ]
 
 
 # =========================================================
@@ -453,6 +621,13 @@ def build_collection_lines(
     date_format: str,
     collector_column: str,
     shorten_collector_names: bool,
+    collecting_method_column: str,
+    habitat_column: str,
+    host_column: str,
+    sex_column: str,
+    life_stage_column: str,
+    additional_details_layout: str,
+    additional_details_separator: str,
 ) -> list[dict[str, str]]:
     """Build the main collection label."""
 
@@ -491,6 +666,17 @@ def build_collection_lines(
     collectors = format_people(
         get_value(row, collector_column),
         shorten_first_names=shorten_collector_names,
+    )
+
+    additional_specimen_lines = build_additional_specimen_lines(
+        row=row,
+        collecting_method_column=collecting_method_column,
+        habitat_column=habitat_column,
+        host_column=host_column,
+        sex_column=sex_column,
+        life_stage_column=life_stage_column,
+        layout=additional_details_layout,
+        separator=additional_details_separator,
     )
 
     lines: list[dict[str, str]] = []
@@ -534,6 +720,8 @@ def build_collection_lines(
                 "style": "regular",
             }
         )
+
+    lines.extend(additional_specimen_lines)
 
     return lines
 
@@ -977,36 +1165,54 @@ st.subheader("3. Select Excel rows")
 first_data_excel_row = int(header_row_number) + 1
 last_excel_row = len(raw_dataframe)
 
-row_selection_columns = st.columns(2)
+default_row_ranges = f"{first_data_excel_row}-{last_excel_row}"
 
-with row_selection_columns[0]:
-    start_excel_row = st.number_input(
-        "From Excel row",
-        min_value=first_data_excel_row,
-        max_value=last_excel_row,
-        value=first_data_excel_row,
-        step=1,
-    )
-
-with row_selection_columns[1]:
-    end_excel_row = st.number_input(
-        "To Excel row",
-        min_value=int(start_excel_row),
-        max_value=last_excel_row,
-        value=last_excel_row,
-        step=1,
-    )
-
-start_position = int(start_excel_row) - first_data_excel_row
-end_position = int(end_excel_row) - first_data_excel_row
-
-dataframe = dataframe.iloc[start_position:end_position + 1].reset_index(
-    drop=True
+row_ranges_text = st.text_input(
+    "Excel rows to print",
+    value=default_row_ranges,
+    key=(
+        f"row_ranges_{uploaded_file.name}_"
+        f"{int(header_row_number)}_{len(raw_dataframe)}"
+    ),
+    placeholder="10-20, 34, 41-56, 72",
+    help=(
+        "Enter individual Excel rows and/or inclusive ranges, separated "
+        "by commas. Example: 10-20, 34, 41-56, 72."
+    ),
 )
 
+selected_excel_rows, row_selection_errors = parse_excel_row_ranges(
+    range_text=row_ranges_text,
+    minimum_row=first_data_excel_row,
+    maximum_row=last_excel_row,
+)
+
+if row_selection_errors:
+    for error_message in row_selection_errors:
+        st.error(error_message)
+    st.stop()
+
+selected_positions = [
+    excel_row - first_data_excel_row
+    for excel_row in selected_excel_rows
+]
+
+dataframe = dataframe.iloc[selected_positions].reset_index(drop=True)
+
+if len(selected_excel_rows) <= 20:
+    selected_rows_summary = ", ".join(
+        str(row_number)
+        for row_number in selected_excel_rows
+    )
+else:
+    selected_rows_summary = (
+        f"{selected_excel_rows[0]} ... {selected_excel_rows[-1]}"
+    )
+
 st.caption(
-    f"Selected {len(dataframe)} row(s): "
-    f"Excel rows {int(start_excel_row)}–{int(end_excel_row)}."
+    f"Selected {len(dataframe)} row(s). "
+    f"Excel rows: {selected_rows_summary}. "
+    "Overlapping ranges are printed only once."
 )
 
 
@@ -1142,6 +1348,72 @@ with mapping_right:
     shorten_identifier_names = st.checkbox(
         "Shorten identifier first names",
         value=True,
+    )
+
+
+st.markdown("#### Optional collection details")
+
+additional_left, additional_middle, additional_right = st.columns(3)
+
+with additional_left:
+    collecting_method_column = st.selectbox(
+        "Collecting method — optional",
+        optional_columns,
+        help="Examples: sweep net, light trap, Malaise trap, hand collected.",
+    )
+
+    habitat_column = st.selectbox(
+        "Habitat — optional",
+        optional_columns,
+        help="Example: dry calcareous grassland.",
+    )
+
+with additional_middle:
+    host_column = st.selectbox(
+        "Host — optional",
+        optional_columns,
+        help="Host plant, animal, fungus, or other associated organism.",
+    )
+
+    sex_column = st.selectbox(
+        "Sex — optional",
+        optional_columns,
+        help="Male/female values are converted to ♂/♀ when recognised.",
+    )
+
+with additional_right:
+    life_stage_column = st.selectbox(
+        "Life stage — optional",
+        optional_columns,
+        help="Examples: adult, larva, nymph, pupa, egg.",
+    )
+
+    additional_details_layout = st.radio(
+        "Additional details layout",
+        options=[
+            "Compact — combine fields",
+            "Separate line for each field",
+        ],
+        horizontal=False,
+        help=(
+            "Compact layout saves space. Separate lines are easier to read "
+            "but may require a taller label."
+        ),
+    )
+
+    additional_details_separator = st.selectbox(
+        "Additional details separator",
+        options=[
+            " · ",
+            "; ",
+            ", ",
+            " / ",
+        ],
+        index=0,
+        disabled=(
+            additional_details_layout
+            == "Separate line for each field"
+        ),
     )
 
 
@@ -1302,15 +1574,15 @@ draw_borders = st.checkbox(
 
 st.subheader("7. Live preview")
 
-preview_excel_row = st.number_input(
+preview_excel_row = st.selectbox(
     "Preview Excel row",
-    min_value=int(start_excel_row),
-    max_value=int(end_excel_row),
-    value=int(start_excel_row),
-    step=1,
+    options=selected_excel_rows,
+    index=0,
+    help="Only rows included in the selection are shown here.",
 )
 
-preview_row = dataframe.iloc[int(preview_excel_row) - int(start_excel_row)]
+preview_position = selected_excel_rows.index(int(preview_excel_row))
+preview_row = dataframe.iloc[preview_position]
 
 collection_preview_lines = build_collection_lines(
     row=preview_row,
@@ -1327,6 +1599,13 @@ collection_preview_lines = build_collection_lines(
     date_format=date_format,
     collector_column=collector_column,
     shorten_collector_names=shorten_collector_names,
+    collecting_method_column=collecting_method_column,
+    habitat_column=habitat_column,
+    host_column=host_column,
+    sex_column=sex_column,
+    life_stage_column=life_stage_column,
+    additional_details_layout=additional_details_layout,
+    additional_details_separator=additional_details_separator,
 )
 
 determination_preview_lines = build_determination_lines(
@@ -1482,6 +1761,13 @@ def create_pdf(
             date_format=date_format,
             collector_column=collector_column,
             shorten_collector_names=shorten_collector_names,
+            collecting_method_column=collecting_method_column,
+            habitat_column=habitat_column,
+            host_column=host_column,
+            sex_column=sex_column,
+            life_stage_column=life_stage_column,
+            additional_details_layout=additional_details_layout,
+            additional_details_separator=additional_details_separator,
         )
 
         label_jobs.append(
