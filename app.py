@@ -1558,6 +1558,41 @@ def render_live_label(
 
 
 # =========================================================
+# EXAMPLE SPREADSHEET
+# =========================================================
+
+with st.expander("✨ New to EntoLabel?", expanded=False):
+    st.write(
+        "Download a ready-to-use example spreadsheet with sample records "
+        "and a short field guide. You can replace the example data with "
+        "your own and keep only the columns you need."
+    )
+
+    example_spreadsheet_path = (
+        Path(__file__).resolve().parent / "EntoLabel_example.xlsx"
+    )
+
+    if example_spreadsheet_path.exists():
+        st.download_button(
+            label="⬇️ Download example spreadsheet",
+            data=example_spreadsheet_path.read_bytes(),
+            file_name="EntoLabel_example.xlsx",
+            mime=(
+                "application/vnd.openxmlformats-officedocument."
+                "spreadsheetml.sheet"
+            ),
+            help=(
+                "The first sheet contains example specimen data. "
+                "The second sheet explains the columns."
+            ),
+        )
+    else:
+        st.caption(
+            "The example spreadsheet is not included in this deployment."
+        )
+
+
+# =========================================================
 # FILE UPLOAD
 # =========================================================
 
@@ -2400,7 +2435,7 @@ if configuration_is_valid:
 
 
 with st.expander(
-    "Darwin Core CSV export — optional",
+    "🌿 Darwin Core CSV export — optional",
     expanded=False,
 ):
     st.caption(
@@ -2896,7 +2931,7 @@ with st.expander(
     ).encode("utf-8-sig")
 
     st.download_button(
-        label="Download Darwin Core CSV",
+        label="🌿 Download Darwin Core CSV",
         data=darwin_core_csv,
         file_name="entolabel_darwin_core.csv",
         mime="text/csv",
