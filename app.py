@@ -2400,7 +2400,7 @@ if configuration_is_valid:
 
 
 with st.expander(
-    "🌿 Darwin Core CSV export — optional",
+    "Darwin Core CSV export — optional",
     expanded=False,
 ):
     st.caption(
