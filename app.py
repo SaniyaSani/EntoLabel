@@ -84,15 +84,12 @@ def register_font(
 PDF_FONT_REGULAR = register_font(
     internal_name="EntoLabelRegular",
     possible_paths=[
-        # Linux / Streamlit Cloud
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-
-        # macOS
         "/System/Library/Fonts/Supplemental/Arial.ttf",
         "/Library/Fonts/Arial.ttf",
         "/System/Library/Fonts/Supplemental/Helvetica.ttf",
+        "/System/Library/Fonts/Supplemental/Times New Roman.ttf",
     ],
     fallback_name="Helvetica",
 )
@@ -100,15 +97,12 @@ PDF_FONT_REGULAR = register_font(
 PDF_FONT_ITALIC = register_font(
     internal_name="EntoLabelItalic",
     possible_paths=[
-        # Linux / Streamlit Cloud
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf",
         "/usr/share/fonts/truetype/liberation2/LiberationSans-Italic.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Italic.ttf",
-
-        # macOS
         "/System/Library/Fonts/Supplemental/Arial Italic.ttf",
         "/Library/Fonts/Arial Italic.ttf",
         "/System/Library/Fonts/Supplemental/Helvetica Oblique.ttf",
+        "/System/Library/Fonts/Supplemental/Times New Roman Italic.ttf",
     ],
     fallback_name="Helvetica-Oblique",
 )
@@ -116,15 +110,12 @@ PDF_FONT_ITALIC = register_font(
 PDF_FONT_BOLD = register_font(
     internal_name="EntoLabelBold",
     possible_paths=[
-        # Linux / Streamlit Cloud
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
         "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-
-        # macOS
         "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
         "/Library/Fonts/Arial Bold.ttf",
         "/System/Library/Fonts/Supplemental/Helvetica Bold.ttf",
+        "/System/Library/Fonts/Supplemental/Times New Roman Bold.ttf",
     ],
     fallback_name="Helvetica-Bold",
 )
@@ -898,17 +889,63 @@ if uploaded_file is None:
 
 
 try:
+    # Read the sheet without assuming where the column names are.
+    # This lets the user choose the Excel/CSV row that contains headers.
     if uploaded_file.name.lower().endswith(".csv"):
-        dataframe = pd.read_csv(uploaded_file)
+        raw_dataframe = pd.read_csv(uploaded_file, header=None)
     else:
-        dataframe = pd.read_excel(uploaded_file)
+        raw_dataframe = pd.read_excel(uploaded_file, header=None)
 except Exception as error:
     st.error(f"Could not read the file: {error}")
     st.stop()
 
 
-if dataframe.empty:
+if raw_dataframe.empty:
     st.warning("The uploaded file is empty.")
+    st.stop()
+
+
+# =========================================================
+# HEADER ROW
+# =========================================================
+
+st.subheader("1. Table header")
+
+header_row_number = st.number_input(
+    "Excel row containing the column names",
+    min_value=1,
+    max_value=len(raw_dataframe),
+    value=1,
+    step=1,
+    help=(
+        "Usually this is row 1. If your file begins with a title or notes, "
+        "choose the row where the actual table headings begin."
+    ),
+)
+
+header_index = int(header_row_number) - 1
+raw_headers = raw_dataframe.iloc[header_index].tolist()
+
+# Make blank and duplicate headings safe for Streamlit/Pandas.
+column_names = []
+name_counts = {}
+
+for position, value in enumerate(raw_headers, start=1):
+    base_name = clean_value(value) or f"Column {position}"
+    occurrence = name_counts.get(base_name, 0) + 1
+    name_counts[base_name] = occurrence
+
+    if occurrence == 1:
+        column_names.append(base_name)
+    else:
+        column_names.append(f"{base_name} ({occurrence})")
+
+dataframe = raw_dataframe.iloc[header_index + 1:].copy()
+dataframe.columns = column_names
+dataframe = dataframe.reset_index(drop=True)
+
+if dataframe.empty:
+    st.warning("There are no data rows below the selected header row.")
     st.stop()
 
 
@@ -916,7 +953,7 @@ if dataframe.empty:
 # EXCEL PREVIEW
 # =========================================================
 
-st.subheader("1. Excel preview")
+st.subheader("2. Excel preview")
 
 preview_dataframe = dataframe.head(10).copy()
 
@@ -932,13 +969,55 @@ st.dataframe(
 
 
 # =========================================================
+# ROW SELECTION
+# =========================================================
+
+st.subheader("3. Select Excel rows")
+
+first_data_excel_row = int(header_row_number) + 1
+last_excel_row = len(raw_dataframe)
+
+row_selection_columns = st.columns(2)
+
+with row_selection_columns[0]:
+    start_excel_row = st.number_input(
+        "From Excel row",
+        min_value=first_data_excel_row,
+        max_value=last_excel_row,
+        value=first_data_excel_row,
+        step=1,
+    )
+
+with row_selection_columns[1]:
+    end_excel_row = st.number_input(
+        "To Excel row",
+        min_value=int(start_excel_row),
+        max_value=last_excel_row,
+        value=last_excel_row,
+        step=1,
+    )
+
+start_position = int(start_excel_row) - first_data_excel_row
+end_position = int(end_excel_row) - first_data_excel_row
+
+dataframe = dataframe.iloc[start_position:end_position + 1].reset_index(
+    drop=True
+)
+
+st.caption(
+    f"Selected {len(dataframe)} row(s): "
+    f"Excel rows {int(start_excel_row)}–{int(end_excel_row)}."
+)
+
+
+# =========================================================
 # COLUMN MAPPING
 # =========================================================
 
 all_columns = dataframe.columns.tolist()
 optional_columns = [NOT_USED] + all_columns
 
-st.subheader("2. Match Excel columns")
+st.subheader("4. Match Excel columns")
 
 mapping_left, mapping_middle, mapping_right = st.columns(3)
 
@@ -1070,7 +1149,7 @@ with mapping_right:
 # IDENTIFICATION SETTINGS
 # =========================================================
 
-st.subheader("3. Determination settings")
+st.subheader("5. Determination settings")
 
 create_determination_label = st.checkbox(
     "Create a separate determination label",
@@ -1120,7 +1199,7 @@ elif identification_year_mode == "One year for all labels":
 # LABEL SIZE SETTINGS
 # =========================================================
 
-st.subheader("4. Label size and typography")
+st.subheader("6. Label size and typography")
 
 st.markdown("#### Collection label")
 
@@ -1221,17 +1300,17 @@ draw_borders = st.checkbox(
 # BUILD PREVIEW LABELS
 # =========================================================
 
-st.subheader("5. Live preview")
+st.subheader("7. Live preview")
 
-preview_row_number = st.number_input(
+preview_excel_row = st.number_input(
     "Preview Excel row",
-    min_value=1,
-    max_value=len(dataframe),
-    value=1,
+    min_value=int(start_excel_row),
+    max_value=int(end_excel_row),
+    value=int(start_excel_row),
     step=1,
 )
 
-preview_row = dataframe.iloc[int(preview_row_number) - 1]
+preview_row = dataframe.iloc[int(preview_excel_row) - int(start_excel_row)]
 
 collection_preview_lines = build_collection_lines(
     row=preview_row,
@@ -1486,7 +1565,7 @@ def create_pdf(
 # EXPORT
 # =========================================================
 
-st.subheader("6. Export")
+st.subheader("8. Export")
 
 configuration_is_valid = True
 
