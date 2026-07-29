@@ -803,6 +803,501 @@ def build_determination_lines(
 
 
 # =========================================================
+# DARWIN CORE EXPORT HELPERS
+# =========================================================
+
+def option_index(
+    options: list[str],
+    preferred_value: str,
+) -> int:
+    """Return a safe selectbox index for a preferred value."""
+
+    try:
+        return options.index(preferred_value)
+    except ValueError:
+        return 0
+
+
+def format_dwc_date(value: Any) -> str:
+    """Format a date as an ISO 8601 value when possible."""
+
+    if value is None:
+        return ""
+
+    try:
+        if pd.isna(value):
+            return ""
+    except (TypeError, ValueError):
+        pass
+
+    if isinstance(value, pd.Timestamp):
+        return value.date().isoformat()
+
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+
+    if isinstance(value, date):
+        return value.isoformat()
+
+    text = str(value).strip()
+
+    if not text:
+        return ""
+
+    # Years, year-month values, full ISO dates, and ISO intervals can
+    # already be valid Darwin Core eventDate/dateIdentified values.
+    if re.fullmatch(
+        r"\d{4}(?:-\d{2}(?:-\d{2})?)?"
+        r"(?:[T ][^/]+)?(?:/.*)?",
+        text,
+    ):
+        return text.replace(" ", "T", 1) if " " in text else text
+
+    parsed_date = parse_date_value(value)
+
+    if parsed_date is None:
+        return text
+
+    return parsed_date.date().isoformat()
+
+
+def format_dwc_people(value: Any) -> str:
+    """Format a list of people using the Darwin Core list separator."""
+
+    text = clean_value(value)
+
+    if not text:
+        return ""
+
+    people = [
+        person.strip()
+        for person in re.split(r"\s*[;,|]\s*", text)
+        if person.strip()
+    ]
+
+    return " | ".join(people)
+
+
+def normalize_dwc_sex(value: Any) -> str:
+    """Normalize common sex values to readable Darwin Core values."""
+
+    text = clean_value(value)
+
+    if not text:
+        return ""
+
+    normalized = re.sub(r"[._-]+", " ", text.lower()).strip()
+
+    if normalized in {
+        "m",
+        "male",
+        "mannlich",
+        "männlich",
+        "masculine",
+        "♂",
+    }:
+        return "male"
+
+    if normalized in {
+        "f",
+        "female",
+        "weiblich",
+        "feminine",
+        "♀",
+    }:
+        return "female"
+
+    if normalized in {
+        "hermaphrodite",
+        "hermaphroditic",
+        "zwitter",
+    }:
+        return "hermaphrodite"
+
+    return text
+
+
+def format_decimal_number(value: Any) -> str:
+    """Return a compact decimal number or an empty string."""
+
+    number = parse_coordinate(value)
+
+    if number is None:
+        return ""
+
+    return f"{number:.10f}".rstrip("0").rstrip(".")
+
+
+def extract_numeric_value(value: Any) -> str:
+    """Extract the first number from values such as '320 m'."""
+
+    text = clean_value(value).replace(",", ".")
+
+    if not text:
+        return ""
+
+    match = re.search(r"[-+]?\d+(?:\.\d+)?", text)
+
+    if match is None:
+        return ""
+
+    try:
+        number = float(match.group(0))
+    except ValueError:
+        return ""
+
+    return f"{number:.10f}".rstrip("0").rstrip(".")
+
+
+def format_associated_host(value: Any) -> str:
+    """Represent a host relationship in dwc:associatedTaxa."""
+
+    host = clean_value(value)
+
+    if not host:
+        return ""
+
+    safe_host = host.replace('"', "'")
+    return f'"host":"{safe_host}"'
+
+
+def get_raw_value(
+    row: pd.Series,
+    column_name: str,
+) -> Any:
+    """Return the original cell value from an optional column."""
+
+    if column_name == NOT_USED:
+        return ""
+
+    if column_name not in row.index:
+        return ""
+
+    return row[column_name]
+
+
+def build_dwc_occurrence_id(
+    row: pd.Series,
+    settings: dict[str, Any],
+    catalog_number: str,
+) -> str:
+    """Build occurrenceID according to the selected strategy."""
+
+    mode = settings["occurrence_id_mode"]
+
+    if mode == "Use an Excel column":
+        return get_value(
+            row,
+            settings["occurrence_id_column"],
+        )
+
+    if mode == "Prefix + catalogNumber":
+        prefix = settings["occurrence_id_prefix"].strip()
+
+        if prefix and catalog_number:
+            return f"{prefix}{catalog_number}"
+
+        return ""
+
+    if mode == "Use catalogNumber directly":
+        return catalog_number
+
+    return ""
+
+
+def build_dwc_identification_date(
+    row: pd.Series,
+    settings: dict[str, Any],
+) -> str:
+    """Build dateIdentified from the selected Darwin Core setting."""
+
+    mode = settings["identification_date_mode"]
+
+    if mode == "Use an Excel column":
+        return format_dwc_date(
+            get_raw_value(
+                row,
+                settings["identification_date_column"],
+            )
+        )
+
+    if mode == "Use current determination settings":
+        current_mode = settings["current_identification_year_mode"]
+
+        if current_mode == "Column from Excel":
+            return format_dwc_date(
+                get_raw_value(
+                    row,
+                    settings["current_identification_year_column"],
+                )
+            )
+
+        if current_mode == "One year for all labels":
+            return format_dwc_date(
+                settings["current_fixed_identification_year"]
+            )
+
+    return ""
+
+
+def create_darwin_core_dataframe(
+    data: pd.DataFrame,
+    settings: dict[str, Any],
+) -> pd.DataFrame:
+    """Create a flat Simple Darwin Core table from selected records."""
+
+    records: list[dict[str, str]] = []
+
+    for _, row in data.iterrows():
+        catalog_number = get_value(
+            row,
+            settings["catalog_number_column"],
+        )
+
+        raw_event_date = get_raw_value(
+            row,
+            settings["event_date_column"],
+        )
+
+        locality = combine_columns(
+            row,
+            settings["locality_columns"],
+            separator=settings["locality_separator"],
+        )
+
+        scientific_name = combine_columns(
+            row,
+            settings["scientific_name_columns"],
+            separator=" ",
+        )
+
+        raw_elevation = get_raw_value(
+            row,
+            settings["elevation_column"],
+        )
+
+        record = {
+            "basisOfRecord": settings["basis_of_record"],
+            "datasetName": settings["dataset_name"].strip(),
+            "institutionCode": settings["institution_code"].strip(),
+            "collectionCode": settings["collection_code"].strip(),
+            "license": settings["license"].strip(),
+            "rightsHolder": settings["rights_holder"].strip(),
+            "catalogNumber": catalog_number,
+            "occurrenceID": build_dwc_occurrence_id(
+                row=row,
+                settings=settings,
+                catalog_number=catalog_number,
+            ),
+            "recordNumber": get_value(
+                row,
+                settings["record_number_column"],
+            ),
+            "occurrenceStatus": settings["occurrence_status"],
+            "recordedBy": format_dwc_people(
+                get_raw_value(
+                    row,
+                    settings["recorded_by_column"],
+                )
+            ),
+            "individualCount": get_value(
+                row,
+                settings["individual_count_column"],
+            ),
+            "sex": normalize_dwc_sex(
+                get_raw_value(
+                    row,
+                    settings["sex_column"],
+                )
+            ),
+            "lifeStage": get_value(
+                row,
+                settings["life_stage_column"],
+            ),
+            "preparations": get_value(
+                row,
+                settings["preparations_column"],
+            ),
+            "associatedTaxa": format_associated_host(
+                get_raw_value(
+                    row,
+                    settings["host_column"],
+                )
+            ),
+            "eventDate": format_dwc_date(raw_event_date),
+            "verbatimEventDate": clean_value(raw_event_date),
+            "samplingProtocol": get_value(
+                row,
+                settings["sampling_protocol_column"],
+            ),
+            "habitat": get_value(
+                row,
+                settings["habitat_column"],
+            ),
+            "country": get_value(
+                row,
+                settings["country_column"],
+            ),
+            "countryCode": get_value(
+                row,
+                settings["country_code_column"],
+            ),
+            "stateProvince": get_value(
+                row,
+                settings["state_province_column"],
+            ),
+            "county": get_value(
+                row,
+                settings["county_column"],
+            ),
+            "municipality": get_value(
+                row,
+                settings["municipality_column"],
+            ),
+            "locality": locality,
+            "decimalLatitude": format_decimal_number(
+                get_raw_value(
+                    row,
+                    settings["latitude_column"],
+                )
+            ),
+            "decimalLongitude": format_decimal_number(
+                get_raw_value(
+                    row,
+                    settings["longitude_column"],
+                )
+            ),
+            "geodeticDatum": settings["geodetic_datum"].strip(),
+            "coordinateUncertaintyInMeters": extract_numeric_value(
+                get_raw_value(
+                    row,
+                    settings["coordinate_uncertainty_column"],
+                )
+            ),
+            "minimumElevationInMeters": extract_numeric_value(
+                raw_elevation
+            ),
+            "maximumElevationInMeters": extract_numeric_value(
+                raw_elevation
+            ),
+            "verbatimElevation": clean_value(raw_elevation),
+            "scientificName": scientific_name,
+            "taxonRank": get_value(
+                row,
+                settings["taxon_rank_column"],
+            ),
+            "identificationQualifier": get_value(
+                row,
+                settings["identification_qualifier_column"],
+            ),
+            "identifiedBy": format_dwc_people(
+                get_raw_value(
+                    row,
+                    settings["identified_by_column"],
+                )
+            ),
+            "dateIdentified": build_dwc_identification_date(
+                row=row,
+                settings=settings,
+            ),
+            "occurrenceRemarks": get_value(
+                row,
+                settings["occurrence_remarks_column"],
+            ),
+        }
+
+        records.append(record)
+
+    result = pd.DataFrame(records)
+
+    if not settings["include_empty_columns"]:
+        non_empty_columns = [
+            column
+            for column in result.columns
+            if result[column].astype(str).str.strip().ne("").any()
+        ]
+        result = result[non_empty_columns]
+
+    return result.fillna("")
+
+
+def darwin_core_validation_messages(
+    data: pd.DataFrame,
+) -> list[tuple[str, str]]:
+    """Return lightweight quality messages for the Darwin Core export."""
+
+    messages: list[tuple[str, str]] = []
+
+    if "catalogNumber" in data.columns:
+        catalog_numbers = data["catalogNumber"].astype(str).str.strip()
+        non_empty_catalog_numbers = catalog_numbers[catalog_numbers.ne("")]
+        missing_count = int(catalog_numbers.eq("").sum())
+        duplicate_count = int(non_empty_catalog_numbers.duplicated().sum())
+
+        if missing_count:
+            messages.append(
+                (
+                    "warning",
+                    f"{missing_count} record(s) have no catalogNumber.",
+                )
+            )
+
+        if duplicate_count:
+            messages.append(
+                (
+                    "warning",
+                    f"{duplicate_count} duplicate catalogNumber value(s) were found.",
+                )
+            )
+
+    if "occurrenceID" in data.columns:
+        occurrence_ids = data["occurrenceID"].astype(str).str.strip()
+        non_empty_occurrence_ids = occurrence_ids[occurrence_ids.ne("")]
+        duplicate_occurrence_ids = int(
+            non_empty_occurrence_ids.duplicated().sum()
+        )
+
+        if occurrence_ids.eq("").all():
+            messages.append(
+                (
+                    "info",
+                    "occurrenceID is empty. That is allowed for a draft export, "
+                    "but a stable globally unique identifier is recommended "
+                    "before publication.",
+                )
+            )
+
+        if duplicate_occurrence_ids:
+            messages.append(
+                (
+                    "warning",
+                    f"{duplicate_occurrence_ids} duplicate occurrenceID value(s) "
+                    "were found.",
+                )
+            )
+
+    for column, label in (
+        ("eventDate", "eventDate"),
+        ("scientificName", "scientificName"),
+        ("locality", "locality"),
+    ):
+        if column in data.columns:
+            missing_count = int(
+                data[column].astype(str).str.strip().eq("").sum()
+            )
+
+            if missing_count:
+                messages.append(
+                    (
+                        "info",
+                        f"{missing_count} record(s) have no {label}.",
+                    )
+                )
+
+    return messages
+
+
+# =========================================================
 # PDF TEXT HELPERS
 # =========================================================
 
@@ -1901,4 +2396,509 @@ if configuration_is_valid:
         data=pdf_bytes,
         file_name="entomology_labels.pdf",
         mime="application/pdf",
+    )
+
+
+with st.expander(
+    "🌿 Darwin Core CSV export — optional",
+    expanded=False,
+):
+    st.caption(
+        "Advanced export for museums, collection databases, and "
+        "biodiversity-data workflows. Nothing here changes the PDF labels. "
+        "The download is a flat Simple Darwin Core CSV, not a full "
+        "Darwin Core Archive."
+    )
+
+    (
+        dwc_dataset_tab,
+        dwc_event_tab,
+        dwc_specimen_tab,
+        dwc_identification_tab,
+    ) = st.tabs(
+        [
+            "Dataset",
+            "Event & location",
+            "Specimen",
+            "Identification",
+        ]
+    )
+
+    with dwc_dataset_tab:
+        dataset_left, dataset_right = st.columns(2)
+
+        with dataset_left:
+            dwc_basis_of_record = st.selectbox(
+                "basisOfRecord",
+                options=[
+                    "PreservedSpecimen",
+                    "FossilSpecimen",
+                    "LivingSpecimen",
+                    "MaterialSample",
+                    "HumanObservation",
+                    "MachineObservation",
+                    "MaterialCitation",
+                ],
+                index=0,
+                key="dwc_basis_of_record",
+                help=(
+                    "For pinned, ethanol-preserved, slide-mounted, or other "
+                    "preserved insects, PreservedSpecimen is usually appropriate."
+                ),
+            )
+
+            dwc_occurrence_status = st.selectbox(
+                "occurrenceStatus",
+                options=[
+                    "detected",
+                    "notDetected",
+                    "",
+                ],
+                index=0,
+                key="dwc_occurrence_status",
+                format_func=lambda value: value or "Leave blank",
+            )
+
+            dwc_dataset_name = st.text_input(
+                "datasetName — optional",
+                key="dwc_dataset_name",
+                placeholder="Croatia field course 2026",
+            )
+
+            dwc_institution_code = st.text_input(
+                "institutionCode — optional",
+                key="dwc_institution_code",
+                placeholder="Institution acronym",
+            )
+
+            dwc_collection_code = st.text_input(
+                "collectionCode — optional",
+                key="dwc_collection_code",
+                placeholder="Diptera",
+            )
+
+        with dataset_right:
+            dwc_license_choice = st.selectbox(
+                "license — optional",
+                options=[
+                    "Leave blank",
+                    "CC0 1.0",
+                    "CC BY 4.0",
+                    "Custom",
+                ],
+                key="dwc_license_choice",
+                help="Choose only a licence you are authorised to apply.",
+            )
+
+            if dwc_license_choice == "CC0 1.0":
+                dwc_license = (
+                    "https://creativecommons.org/publicdomain/zero/1.0/"
+                )
+            elif dwc_license_choice == "CC BY 4.0":
+                dwc_license = (
+                    "https://creativecommons.org/licenses/by/4.0/"
+                )
+            elif dwc_license_choice == "Custom":
+                dwc_license = st.text_input(
+                    "Custom licence URL or text",
+                    key="dwc_custom_license",
+                )
+            else:
+                dwc_license = ""
+
+            dwc_rights_holder = st.text_input(
+                "rightsHolder — optional",
+                key="dwc_rights_holder",
+            )
+
+            dwc_include_empty_columns = st.checkbox(
+                "Keep completely empty Darwin Core columns",
+                value=False,
+                key="dwc_include_empty_columns",
+                help=(
+                    "Normally EntoLabel removes fields that are empty for "
+                    "every selected record."
+                ),
+            )
+
+    with dwc_event_tab:
+        event_left, event_middle, event_right = st.columns(3)
+
+        with event_left:
+            dwc_event_date_column = st.selectbox(
+                "eventDate column",
+                optional_columns,
+                index=option_index(optional_columns, date_column),
+                key="dwc_event_date_column",
+                help="Dates are converted to ISO format when possible.",
+            )
+
+            dwc_recorded_by_column = st.selectbox(
+                "recordedBy column",
+                optional_columns,
+                index=option_index(optional_columns, collector_column),
+                key="dwc_recorded_by_column",
+            )
+
+            dwc_sampling_protocol_column = st.selectbox(
+                "samplingProtocol column",
+                optional_columns,
+                index=option_index(
+                    optional_columns,
+                    collecting_method_column,
+                ),
+                key="dwc_sampling_protocol_column",
+            )
+
+            dwc_habitat_column = st.selectbox(
+                "habitat column",
+                optional_columns,
+                index=option_index(optional_columns, habitat_column),
+                key="dwc_habitat_column",
+            )
+
+        with event_middle:
+            dwc_country_column = st.selectbox(
+                "country column — optional",
+                optional_columns,
+                key="dwc_country_column",
+            )
+
+            dwc_country_code_column = st.selectbox(
+                "countryCode column — optional",
+                optional_columns,
+                key="dwc_country_code_column",
+                help="Prefer a two-letter ISO country code when available.",
+            )
+
+            dwc_state_province_column = st.selectbox(
+                "stateProvince column — optional",
+                optional_columns,
+                key="dwc_state_province_column",
+            )
+
+            dwc_county_column = st.selectbox(
+                "county column — optional",
+                optional_columns,
+                key="dwc_county_column",
+            )
+
+            dwc_municipality_column = st.selectbox(
+                "municipality column — optional",
+                optional_columns,
+                key="dwc_municipality_column",
+            )
+
+        with event_right:
+            dwc_locality_columns = st.multiselect(
+                "locality — select one or several columns",
+                all_columns,
+                default=[
+                    column
+                    for column in locality_columns
+                    if column in all_columns
+                ],
+                key="dwc_locality_columns",
+            )
+
+            dwc_locality_separator = st.selectbox(
+                "Locality separator",
+                options=[
+                    ", ",
+                    " | ",
+                    " · ",
+                    " / ",
+                ],
+                index=0,
+                key="dwc_locality_separator",
+            )
+
+            dwc_latitude_column = st.selectbox(
+                "decimalLatitude column",
+                optional_columns,
+                index=option_index(optional_columns, latitude_column),
+                key="dwc_latitude_column",
+            )
+
+            dwc_longitude_column = st.selectbox(
+                "decimalLongitude column",
+                optional_columns,
+                index=option_index(optional_columns, longitude_column),
+                key="dwc_longitude_column",
+            )
+
+            dwc_elevation_column = st.selectbox(
+                "Elevation column",
+                optional_columns,
+                index=option_index(optional_columns, altitude_column),
+                key="dwc_elevation_column",
+                help=(
+                    "The same numeric value is exported as minimum and "
+                    "maximum elevation, while the original value is kept "
+                    "as verbatimElevation."
+                ),
+            )
+
+            dwc_geodetic_datum = st.text_input(
+                "geodeticDatum — optional",
+                key="dwc_geodetic_datum",
+                placeholder="WGS84",
+                help="Fill this only when the coordinate datum is known.",
+            )
+
+            dwc_coordinate_uncertainty_column = st.selectbox(
+                "coordinateUncertaintyInMeters column — optional",
+                optional_columns,
+                key="dwc_coordinate_uncertainty_column",
+            )
+
+    with dwc_specimen_tab:
+        specimen_left, specimen_right = st.columns(2)
+
+        with specimen_left:
+            dwc_catalog_number_column = st.selectbox(
+                "catalogNumber column",
+                optional_columns,
+                index=option_index(optional_columns, specimen_id_column),
+                key="dwc_catalog_number_column",
+                help=(
+                    "This normally uses the same specimen ID selected for "
+                    "the label."
+                ),
+            )
+
+            dwc_occurrence_id_mode = st.selectbox(
+                "occurrenceID",
+                options=[
+                    "Leave blank",
+                    "Use an Excel column",
+                    "Prefix + catalogNumber",
+                    "Use catalogNumber directly",
+                ],
+                key="dwc_occurrence_id_mode",
+                help=(
+                    "A stable globally unique occurrenceID is recommended "
+                    "for publication. A local catalogNumber alone may not be "
+                    "globally unique."
+                ),
+            )
+
+            dwc_occurrence_id_column = NOT_USED
+            dwc_occurrence_id_prefix = ""
+
+            if dwc_occurrence_id_mode == "Use an Excel column":
+                dwc_occurrence_id_column = st.selectbox(
+                    "occurrenceID column",
+                    optional_columns,
+                    key="dwc_occurrence_id_column",
+                )
+
+            elif dwc_occurrence_id_mode == "Prefix + catalogNumber":
+                dwc_occurrence_id_prefix = st.text_input(
+                    "Stable prefix",
+                    key="dwc_occurrence_id_prefix",
+                    placeholder="https://example.org/specimens/",
+                )
+
+            dwc_record_number_column = st.selectbox(
+                "recordNumber column — optional",
+                optional_columns,
+                key="dwc_record_number_column",
+                help="A collector's field number, when different from catalogNumber.",
+            )
+
+            dwc_individual_count_column = st.selectbox(
+                "individualCount column — optional",
+                optional_columns,
+                key="dwc_individual_count_column",
+            )
+
+        with specimen_right:
+            dwc_sex_column = st.selectbox(
+                "sex column",
+                optional_columns,
+                index=option_index(optional_columns, sex_column),
+                key="dwc_sex_column",
+            )
+
+            dwc_life_stage_column = st.selectbox(
+                "lifeStage column",
+                optional_columns,
+                index=option_index(optional_columns, life_stage_column),
+                key="dwc_life_stage_column",
+            )
+
+            dwc_host_column = st.selectbox(
+                "Host column → associatedTaxa",
+                optional_columns,
+                index=option_index(optional_columns, host_column),
+                key="dwc_host_column",
+                help=(
+                    "A host such as Quercus robur is exported as "
+                    '"host":"Quercus robur".'
+                ),
+            )
+
+            dwc_preparations_column = st.selectbox(
+                "preparations column — optional",
+                optional_columns,
+                key="dwc_preparations_column",
+                help="Examples: pinned, ethanol 96%, slide-mounted.",
+            )
+
+            dwc_occurrence_remarks_column = st.selectbox(
+                "occurrenceRemarks column — optional",
+                optional_columns,
+                key="dwc_occurrence_remarks_column",
+            )
+
+    with dwc_identification_tab:
+        identification_left, identification_right = st.columns(2)
+
+        with identification_left:
+            dwc_scientific_name_columns = st.multiselect(
+                "scientificName — select one or several columns",
+                all_columns,
+                default=[
+                    column
+                    for column in scientific_name_columns
+                    if column in all_columns
+                ],
+                key="dwc_scientific_name_columns",
+            )
+
+            dwc_identified_by_column = st.selectbox(
+                "identifiedBy column",
+                optional_columns,
+                index=option_index(optional_columns, identifier_column),
+                key="dwc_identified_by_column",
+            )
+
+            dwc_identification_date_mode = st.selectbox(
+                "dateIdentified",
+                options=[
+                    "Use current determination settings",
+                    "Use an Excel column",
+                    "Leave blank",
+                ],
+                key="dwc_identification_date_mode",
+            )
+
+            dwc_identification_date_column = NOT_USED
+
+            if dwc_identification_date_mode == "Use an Excel column":
+                dwc_identification_date_column = st.selectbox(
+                    "dateIdentified column",
+                    optional_columns,
+                    key="dwc_identification_date_column",
+                )
+
+        with identification_right:
+            dwc_identification_qualifier_column = st.selectbox(
+                "identificationQualifier column — optional",
+                optional_columns,
+                key="dwc_identification_qualifier_column",
+                help="Examples: cf., aff., ?, sensu lato.",
+            )
+
+            dwc_taxon_rank_column = st.selectbox(
+                "taxonRank column — optional",
+                optional_columns,
+                key="dwc_taxon_rank_column",
+                help="Examples: species, genus, family.",
+            )
+
+    darwin_core_settings = {
+        "basis_of_record": dwc_basis_of_record,
+        "occurrence_status": dwc_occurrence_status,
+        "dataset_name": dwc_dataset_name,
+        "institution_code": dwc_institution_code,
+        "collection_code": dwc_collection_code,
+        "license": dwc_license,
+        "rights_holder": dwc_rights_holder,
+        "include_empty_columns": dwc_include_empty_columns,
+        "event_date_column": dwc_event_date_column,
+        "recorded_by_column": dwc_recorded_by_column,
+        "sampling_protocol_column": dwc_sampling_protocol_column,
+        "habitat_column": dwc_habitat_column,
+        "country_column": dwc_country_column,
+        "country_code_column": dwc_country_code_column,
+        "state_province_column": dwc_state_province_column,
+        "county_column": dwc_county_column,
+        "municipality_column": dwc_municipality_column,
+        "locality_columns": dwc_locality_columns,
+        "locality_separator": dwc_locality_separator,
+        "latitude_column": dwc_latitude_column,
+        "longitude_column": dwc_longitude_column,
+        "elevation_column": dwc_elevation_column,
+        "geodetic_datum": dwc_geodetic_datum,
+        "coordinate_uncertainty_column": (
+            dwc_coordinate_uncertainty_column
+        ),
+        "catalog_number_column": dwc_catalog_number_column,
+        "occurrence_id_mode": dwc_occurrence_id_mode,
+        "occurrence_id_column": dwc_occurrence_id_column,
+        "occurrence_id_prefix": dwc_occurrence_id_prefix,
+        "record_number_column": dwc_record_number_column,
+        "individual_count_column": dwc_individual_count_column,
+        "sex_column": dwc_sex_column,
+        "life_stage_column": dwc_life_stage_column,
+        "host_column": dwc_host_column,
+        "preparations_column": dwc_preparations_column,
+        "occurrence_remarks_column": dwc_occurrence_remarks_column,
+        "scientific_name_columns": dwc_scientific_name_columns,
+        "identified_by_column": dwc_identified_by_column,
+        "identification_date_mode": dwc_identification_date_mode,
+        "identification_date_column": dwc_identification_date_column,
+        "identification_qualifier_column": (
+            dwc_identification_qualifier_column
+        ),
+        "taxon_rank_column": dwc_taxon_rank_column,
+        "current_identification_year_mode": identification_year_mode,
+        "current_identification_year_column": identification_year_column,
+        "current_fixed_identification_year": fixed_identification_year,
+    }
+
+    darwin_core_dataframe = create_darwin_core_dataframe(
+        data=dataframe,
+        settings=darwin_core_settings,
+    )
+
+    st.markdown("#### Export check")
+    st.caption(
+        f"{len(darwin_core_dataframe)} record(s) · "
+        f"{len(darwin_core_dataframe.columns)} Darwin Core field(s)"
+    )
+
+    for message_type, message_text in darwin_core_validation_messages(
+        darwin_core_dataframe
+    ):
+        if message_type == "warning":
+            st.warning(message_text)
+        else:
+            st.info(message_text)
+
+    show_dwc_preview = st.checkbox(
+        "Show Darwin Core preview",
+        value=False,
+        key="show_dwc_preview",
+    )
+
+    if show_dwc_preview:
+        st.dataframe(
+            darwin_core_dataframe.head(20).astype(str),
+            width="stretch",
+        )
+
+    darwin_core_csv = darwin_core_dataframe.to_csv(
+        index=False,
+        lineterminator="\n",
+    ).encode("utf-8-sig")
+
+    st.download_button(
+        label="🌿 Download Darwin Core CSV",
+        data=darwin_core_csv,
+        file_name="entolabel_darwin_core.csv",
+        mime="text/csv",
+        key="download_darwin_core_csv",
     )
