@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, time
 from html import escape
 from io import BytesIO
@@ -52,6 +53,56 @@ ROMAN_MONTHS = {
     11: "XI",
     12: "XII",
 }
+
+
+# =========================================================
+# PRESET SETTINGS
+# =========================================================
+
+PRESET_VERSION = 1
+PRESET_WIDGET_KEYS = ['header_row_number', 'row_ranges_text', 'specimen_id_column', 'locality_columns', 'locality_separator_option', 'latitude_column', 'longitude_column', 'altitude_column', 'date_column', 'date_format', 'collector_column', 'shorten_collector_names', 'print_coordinates', 'coordinate_decimal_places', 'coordinate_separator', 'scientific_name_columns', 'identifier_column', 'shorten_identifier_names', 'collecting_method_column', 'habitat_column', 'host_column', 'sex_column', 'life_stage_column', 'additional_details_layout', 'additional_details_separator', 'label_output_mode', 'print_id_on_determination_label', 'identification_year_mode', 'identification_year_column', 'fixed_identification_year', 'collection_width_mm', 'collection_height_mm', 'collection_font_size', 'collection_line_spacing', 'determination_width_mm', 'determination_height_mm', 'determination_font_size', 'determination_line_spacing', 'draw_borders', 'preview_excel_row', 'dwc_basis_of_record', 'dwc_occurrence_status', 'dwc_dataset_name', 'dwc_institution_code', 'dwc_collection_code', 'dwc_license_choice', 'dwc_license', 'dwc_rights_holder', 'dwc_include_empty_columns', 'dwc_event_date_column', 'dwc_recorded_by_column', 'dwc_sampling_protocol_column', 'dwc_habitat_column', 'dwc_country_column', 'dwc_country_code_column', 'dwc_state_province_column', 'dwc_county_column', 'dwc_municipality_column', 'dwc_locality_columns', 'dwc_locality_separator', 'dwc_latitude_column', 'dwc_longitude_column', 'dwc_elevation_column', 'dwc_geodetic_datum', 'dwc_coordinate_uncertainty_column', 'dwc_catalog_number_column', 'dwc_occurrence_id_mode', 'dwc_occurrence_id_column', 'dwc_occurrence_id_prefix', 'dwc_record_number_column', 'dwc_individual_count_column', 'dwc_sex_column', 'dwc_life_stage_column', 'dwc_host_column', 'dwc_preparations_column', 'dwc_occurrence_remarks_column', 'dwc_scientific_name_columns', 'dwc_identified_by_column', 'dwc_identification_date_mode', 'dwc_identification_date_column', 'dwc_identification_qualifier_column', 'dwc_taxon_rank_column', 'show_dwc_preview']
+
+PRESET_SINGLE_COLUMN_KEYS = {
+    "specimen_id_column", "latitude_column", "longitude_column",
+    "altitude_column", "date_column", "collector_column",
+    "identifier_column", "collecting_method_column", "habitat_column",
+    "host_column", "sex_column", "life_stage_column",
+    "identification_year_column", "dwc_event_date_column",
+    "dwc_recorded_by_column", "dwc_sampling_protocol_column",
+    "dwc_habitat_column", "dwc_country_column", "dwc_country_code_column",
+    "dwc_state_province_column", "dwc_county_column",
+    "dwc_municipality_column", "dwc_latitude_column",
+    "dwc_longitude_column", "dwc_elevation_column",
+    "dwc_coordinate_uncertainty_column", "dwc_catalog_number_column",
+    "dwc_occurrence_id_column", "dwc_record_number_column",
+    "dwc_individual_count_column", "dwc_sex_column",
+    "dwc_life_stage_column", "dwc_host_column",
+    "dwc_preparations_column", "dwc_occurrence_remarks_column",
+    "dwc_identified_by_column", "dwc_identification_date_column",
+    "dwc_identification_qualifier_column", "dwc_taxon_rank_column",
+}
+PRESET_MULTI_COLUMN_KEYS = {
+    "locality_columns", "scientific_name_columns",
+    "dwc_locality_columns", "dwc_scientific_name_columns",
+}
+
+def json_safe_value(value: Any) -> Any:
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if isinstance(value, (list, tuple)):
+        return [json_safe_value(item) for item in value]
+    return str(value)
+
+def build_preset_payload() -> dict[str, Any]:
+    settings = {}
+    for key in PRESET_WIDGET_KEYS:
+        if key in st.session_state:
+            settings[key] = json_safe_value(st.session_state[key])
+    return {
+        "format": "EntoLabel preset",
+        "version": PRESET_VERSION,
+        "settings": settings,
+    }
 
 
 # =========================================================
@@ -1624,6 +1675,68 @@ if raw_dataframe.empty:
 
 
 # =========================================================
+# LOAD PRESET
+# =========================================================
+
+with st.expander("💾 Load a saved preset — optional", expanded=False):
+    st.caption(
+        "A preset restores column mappings, label dimensions, formatting, "
+        "row selection and Darwin Core settings. It does not contain "
+        "specimen data."
+    )
+    preset_upload = st.file_uploader(
+        "Upload EntoLabel preset",
+        type=["json"],
+        key="preset_upload",
+    )
+    apply_preset_button = st.button(
+        "Apply preset",
+        disabled=preset_upload is None,
+        key="apply_preset_button",
+    )
+    if apply_preset_button and preset_upload is not None:
+        try:
+            preset_payload = json.loads(
+                preset_upload.getvalue().decode("utf-8-sig")
+            )
+            preset_settings = preset_payload.get("settings", preset_payload)
+            if not isinstance(preset_settings, dict):
+                raise ValueError("Preset settings must be a JSON object.")
+            st.session_state["_pending_entolabel_preset"] = preset_settings
+            st.rerun()
+        except Exception as error:
+            st.error(f"Could not load the preset: {error}")
+
+if "_preset_flash_message" in st.session_state:
+    st.success(st.session_state.pop("_preset_flash_message"))
+
+pending_preset = st.session_state.pop("_pending_entolabel_preset", None)
+if pending_preset is not None:
+    saved_header_row = pending_preset.get("header_row_number")
+    if isinstance(saved_header_row, (int, float)):
+        st.session_state["header_row_number"] = max(
+            1, min(int(saved_header_row), len(raw_dataframe))
+        )
+
+    # Static settings can be restored immediately, before their widgets are
+    # created. Column mappings are restored later, once this file's headings
+    # are known and can be validated.
+    column_setting_keys = (
+        PRESET_SINGLE_COLUMN_KEYS | PRESET_MULTI_COLUMN_KEYS
+    )
+    for key, value in pending_preset.items():
+        if key == "header_row_number" or key in column_setting_keys:
+            continue
+        st.session_state[key] = value
+
+    st.session_state["_preset_after_header"] = {
+        key: value
+        for key, value in pending_preset.items()
+        if key in column_setting_keys
+    }
+
+
+# =========================================================
 # HEADER ROW
 # =========================================================
 
@@ -1639,6 +1752,7 @@ header_row_number = st.number_input(
         "Usually this is row 1. If your file begins with a title or notes, "
         "choose the row where the actual table headings begin."
     ),
+    key="header_row_number",
 )
 
 header_index = int(header_row_number) - 1
@@ -1750,8 +1864,36 @@ st.caption(
 # COLUMN MAPPING
 # =========================================================
 
-all_columns = dataframe.columns.tolist()
+all_columns = selected_dataframe.columns.tolist()
 optional_columns = [NOT_USED] + all_columns
+
+preset_after_header = st.session_state.pop("_preset_after_header", None)
+if preset_after_header is not None:
+    skipped_columns = []
+    for key, value in preset_after_header.items():
+        if key in {"header_row_number", "preset_upload", "apply_preset_button"}:
+            continue
+        if key in PRESET_SINGLE_COLUMN_KEYS:
+            if value not in optional_columns:
+                if value not in (None, "", NOT_USED):
+                    skipped_columns.append(str(value))
+                value = NOT_USED
+        elif key in PRESET_MULTI_COLUMN_KEYS:
+            if not isinstance(value, list):
+                value = []
+            skipped_columns.extend(
+                str(item) for item in value if item not in all_columns
+            )
+            value = [item for item in value if item in all_columns]
+        st.session_state[key] = value
+    message = "Preset applied."
+    if skipped_columns:
+        message += (
+            " Some saved columns were not found and were left unassigned: "
+            + ", ".join(sorted(set(skipped_columns)))
+        )
+    st.session_state["_preset_flash_message"] = message
+    st.rerun()
 
 st.subheader("4. Match Excel columns")
 
@@ -1766,12 +1908,14 @@ with mapping_left:
             "The ID will be printed as the first line "
             "of the collection label."
         ),
+        key="specimen_id_column",
     )
 
     locality_columns = st.multiselect(
         "Location — select one or several columns",
         all_columns,
         help="Example: Country + Region + Locality.",
+        key="locality_columns",
     )
 
     locality_separator_option = st.selectbox(
@@ -1783,21 +1927,25 @@ with mapping_left:
             " / ",
         ],
         index=0,
+        key="locality_separator_option",
     )
 
     latitude_column = st.selectbox(
         "Latitude — optional",
         optional_columns,
+        key="latitude_column",
     )
 
     longitude_column = st.selectbox(
         "Longitude — optional",
         optional_columns,
+        key="longitude_column",
     )
 
     altitude_column = st.selectbox(
         "Altitude — optional",
         optional_columns,
+        key="altitude_column",
     )
 
 
@@ -1805,6 +1953,7 @@ with mapping_middle:
     date_column = st.selectbox(
         "Collection date",
         optional_columns,
+        key="date_column",
     )
 
     date_format = st.selectbox(
@@ -1816,11 +1965,13 @@ with mapping_middle:
             "2026-07-15",
         ],
         index=0,
+        key="date_format",
     )
 
     collector_column = st.selectbox(
         "Collectors",
         optional_columns,
+        key="collector_column",
     )
 
     shorten_collector_names = st.checkbox(
@@ -1830,6 +1981,7 @@ with mapping_middle:
             "Saniya Sagutdinova becomes "
             "S. Sagutdinova."
         ),
+        key="shorten_collector_names",
     )
 
     print_coordinates = st.checkbox(
@@ -1840,6 +1992,7 @@ with mapping_middle:
             and longitude_column == NOT_USED
             and altitude_column == NOT_USED
         ),
+        key="print_coordinates",
     )
 
     coordinate_decimal_places = st.number_input(
@@ -1849,6 +2002,7 @@ with mapping_middle:
         value=4,
         step=1,
         disabled=not print_coordinates,
+        key="coordinate_decimal_places",
     )
 
     coordinate_separator = st.selectbox(
@@ -1860,6 +2014,7 @@ with mapping_middle:
         ],
         index=0,
         disabled=not print_coordinates,
+        key="coordinate_separator",
     )
 
 
@@ -1868,16 +2023,19 @@ with mapping_right:
         "Scientific name — select several columns",
         all_columns,
         help="Example: Genus + Qualifier + Species.",
+        key="scientific_name_columns",
     )
 
     identifier_column = st.selectbox(
         "Identifier / determiner — optional",
         optional_columns,
+        key="identifier_column",
     )
 
     shorten_identifier_names = st.checkbox(
         "Shorten identifier first names",
         value=True,
+        key="shorten_identifier_names",
     )
 
 
@@ -1890,12 +2048,14 @@ with additional_left:
         "Collecting method — optional",
         optional_columns,
         help="Examples: sweep net, light trap, Malaise trap, hand collected.",
+        key="collecting_method_column",
     )
 
     habitat_column = st.selectbox(
         "Habitat — optional",
         optional_columns,
         help="Example: dry calcareous grassland.",
+        key="habitat_column",
     )
 
 with additional_middle:
@@ -1903,12 +2063,14 @@ with additional_middle:
         "Host — optional",
         optional_columns,
         help="Host plant, animal, fungus, or other associated organism.",
+        key="host_column",
     )
 
     sex_column = st.selectbox(
         "Sex — optional",
         optional_columns,
         help="Male/female values are converted to ♂/♀ when recognised.",
+        key="sex_column",
     )
 
 with additional_right:
@@ -1916,6 +2078,7 @@ with additional_right:
         "Life stage — optional",
         optional_columns,
         help="Examples: adult, larva, nymph, pupa, egg.",
+        key="life_stage_column",
     )
 
     additional_details_layout = st.radio(
@@ -1929,6 +2092,7 @@ with additional_right:
             "Compact layout saves space. Separate lines are easier to read "
             "but may require a taller label."
         ),
+        key="additional_details_layout",
     )
 
     additional_details_separator = st.selectbox(
@@ -1944,6 +2108,7 @@ with additional_right:
             additional_details_layout
             == "Separate line for each field"
         ),
+        key="additional_details_separator",
     )
 
 
@@ -1953,22 +2118,42 @@ with additional_right:
 
 st.subheader("5. Determination settings")
 
-create_determination_label = st.checkbox(
-    "Create a separate determination label",
-    value=True,
+label_output_mode = st.radio(
+    "Labels to create",
+    options=[
+        "Collection + determination labels",
+        "Collection labels only",
+        "Determination labels only",
+    ],
+    horizontal=True,
+    help=(
+        "Choose determination labels only when the specimens already "
+        "have their collection labels and have been identified later."
+    ),
+    key="label_output_mode",
 )
+
+print_collection_labels = label_output_mode in {
+    "Collection + determination labels",
+    "Collection labels only",
+}
+print_determination_labels = label_output_mode in {
+    "Collection + determination labels",
+    "Determination labels only",
+}
 
 print_id_on_determination_label = st.checkbox(
     "Print specimen ID on determination label",
     value=False,
     disabled=(
-        not create_determination_label
+        not print_determination_labels
         or specimen_id_column == NOT_USED
     ),
     help=(
         "Uses the same specimen ID column selected "
         "for the collection label."
     ),
+    key="print_id_on_determination_label",
 )
 
 identification_year_mode = st.radio(
@@ -1979,6 +2164,7 @@ identification_year_mode = st.radio(
         "One year for all labels",
     ],
     horizontal=True,
+    key="identification_year_mode",
 )
 
 identification_year_column = NOT_USED
@@ -1988,12 +2174,14 @@ if identification_year_mode == "Column from Excel":
     identification_year_column = st.selectbox(
         "Identification year column",
         optional_columns,
+        key="identification_year_column",
     )
 
 elif identification_year_mode == "One year for all labels":
     fixed_identification_year = st.text_input(
         "Identification year",
         value=str(datetime.now().year),
+        key="fixed_identification_year",
     )
 
 
@@ -2003,48 +2191,58 @@ elif identification_year_mode == "One year for all labels":
 
 st.subheader("6. Label size and typography")
 
-st.markdown("#### Collection label")
+if print_collection_labels:
+    st.markdown("#### Collection label")
 
-collection_settings = st.columns(4)
+    collection_settings = st.columns(4)
 
-with collection_settings[0]:
-    collection_width_mm = st.number_input(
-        "Collection width, mm",
-        min_value=10.0,
-        max_value=60.0,
-        value=20.0,
-        step=1.0,
-    )
+    with collection_settings[0]:
+        collection_width_mm = st.number_input(
+            "Collection width, mm",
+            min_value=10.0,
+            max_value=60.0,
+            value=20.0,
+            step=1.0,
+            key="collection_width_mm",
+        )
 
-with collection_settings[1]:
-    collection_height_mm = st.number_input(
-        "Collection height, mm",
-        min_value=6.0,
-        max_value=40.0,
-        value=10.0,
-        step=1.0,
-    )
+    with collection_settings[1]:
+        collection_height_mm = st.number_input(
+            "Collection height, mm",
+            min_value=6.0,
+            max_value=40.0,
+            value=10.0,
+            step=1.0,
+            key="collection_height_mm",
+        )
 
-with collection_settings[2]:
-    collection_font_size = st.number_input(
-        "Collection font, pt",
-        min_value=3.0,
-        max_value=10.0,
-        value=5.0,
-        step=0.25,
-    )
+    with collection_settings[2]:
+        collection_font_size = st.number_input(
+            "Collection font, pt",
+            min_value=3.0,
+            max_value=10.0,
+            value=5.0,
+            step=0.25,
+            key="collection_font_size",
+        )
 
-with collection_settings[3]:
-    collection_line_spacing = st.number_input(
-        "Collection line spacing",
-        min_value=0.8,
-        max_value=1.5,
-        value=1.05,
-        step=0.05,
-    )
+    with collection_settings[3]:
+        collection_line_spacing = st.number_input(
+            "Collection line spacing",
+            min_value=0.8,
+            max_value=1.5,
+            value=1.05,
+            step=0.05,
+            key="collection_line_spacing",
+        )
+else:
+    collection_width_mm = 20.0
+    collection_height_mm = 10.0
+    collection_font_size = 5.0
+    collection_line_spacing = 1.05
 
 
-if create_determination_label:
+if print_determination_labels:
     st.markdown("#### Determination label")
 
     determination_settings = st.columns(4)
@@ -2056,6 +2254,7 @@ if create_determination_label:
             max_value=60.0,
             value=20.0,
             step=1.0,
+            key="determination_width_mm",
         )
 
     with determination_settings[1]:
@@ -2065,6 +2264,7 @@ if create_determination_label:
             max_value=30.0,
             value=7.0,
             step=1.0,
+            key="determination_height_mm",
         )
 
     with determination_settings[2]:
@@ -2074,6 +2274,7 @@ if create_determination_label:
             max_value=10.0,
             value=5.0,
             step=0.25,
+            key="determination_font_size",
         )
 
     with determination_settings[3]:
@@ -2083,18 +2284,20 @@ if create_determination_label:
             max_value=1.5,
             value=1.05,
             step=0.05,
+            key="determination_line_spacing",
         )
 
 else:
-    determination_width_mm = collection_width_mm
-    determination_height_mm = collection_height_mm
-    determination_font_size = collection_font_size
-    determination_line_spacing = collection_line_spacing
+    determination_width_mm = 20.0
+    determination_height_mm = 7.0
+    determination_font_size = 5.0
+    determination_line_spacing = 1.05
 
 
 draw_borders = st.checkbox(
     "Draw cutting borders",
     value=True,
+    key="draw_borders",
 )
 
 
@@ -2109,6 +2312,7 @@ preview_excel_row = st.selectbox(
     options=selected_excel_rows,
     index=0,
     help="Only rows included in the selection are shown here.",
+    key="preview_excel_row",
 )
 
 preview_position = selected_excel_rows.index(int(preview_excel_row))
@@ -2150,29 +2354,31 @@ determination_preview_lines = build_determination_lines(
     fixed_identification_year=fixed_identification_year,
 )
 
-preview_columns = st.columns(2)
+preview_count = int(print_collection_labels) + int(
+    print_determination_labels
+)
+preview_columns = st.columns(preview_count)
+preview_column_index = 0
 
-with preview_columns[0]:
-    render_live_label(
-        title="Collection label",
-        lines=collection_preview_lines,
-        width_mm=collection_width_mm,
-        height_mm=collection_height_mm,
-        font_size_pt=collection_font_size,
-    )
+if print_collection_labels:
+    with preview_columns[preview_column_index]:
+        render_live_label(
+            title="Collection label",
+            lines=collection_preview_lines,
+            width_mm=collection_width_mm,
+            height_mm=collection_height_mm,
+            font_size_pt=collection_font_size,
+        )
+    preview_column_index += 1
 
-with preview_columns[1]:
-    if create_determination_label:
+if print_determination_labels:
+    with preview_columns[preview_column_index]:
         render_live_label(
             title="Determination label",
             lines=determination_preview_lines,
             width_mm=determination_width_mm,
             height_mm=determination_height_mm,
             font_size_pt=determination_font_size,
-        )
-    else:
-        st.info(
-            "Separate determination labels are disabled."
         )
 
 
@@ -2256,7 +2462,7 @@ def draw_label(
 def create_pdf(
     data: pd.DataFrame,
 ) -> tuple[bytes, int]:
-    """Create an A4 PDF with collection and determination labels."""
+    """Create an A4 PDF with the selected label types."""
 
     buffer = BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=A4)
@@ -2276,41 +2482,42 @@ def create_pdf(
     label_jobs: list[dict[str, Any]] = []
 
     for _, row in data.iterrows():
-        collection_lines = build_collection_lines(
-            row=row,
-            specimen_id_column=specimen_id_column,
-            locality_columns=locality_columns,
-            locality_separator=locality_separator_option,
-            latitude_column=latitude_column,
-            longitude_column=longitude_column,
-            altitude_column=altitude_column,
-            print_coordinates=print_coordinates,
-            coordinate_decimal_places=int(coordinate_decimal_places),
-            coordinate_separator=coordinate_separator,
-            date_column=date_column,
-            date_format=date_format,
-            collector_column=collector_column,
-            shorten_collector_names=shorten_collector_names,
-            collecting_method_column=collecting_method_column,
-            habitat_column=habitat_column,
-            host_column=host_column,
-            sex_column=sex_column,
-            life_stage_column=life_stage_column,
-            additional_details_layout=additional_details_layout,
-            additional_details_separator=additional_details_separator,
-        )
+        if print_collection_labels:
+            collection_lines = build_collection_lines(
+                row=row,
+                specimen_id_column=specimen_id_column,
+                locality_columns=locality_columns,
+                locality_separator=locality_separator_option,
+                latitude_column=latitude_column,
+                longitude_column=longitude_column,
+                altitude_column=altitude_column,
+                print_coordinates=print_coordinates,
+                coordinate_decimal_places=int(coordinate_decimal_places),
+                coordinate_separator=coordinate_separator,
+                date_column=date_column,
+                date_format=date_format,
+                collector_column=collector_column,
+                shorten_collector_names=shorten_collector_names,
+                collecting_method_column=collecting_method_column,
+                habitat_column=habitat_column,
+                host_column=host_column,
+                sex_column=sex_column,
+                life_stage_column=life_stage_column,
+                additional_details_layout=additional_details_layout,
+                additional_details_separator=additional_details_separator,
+            )
 
-        label_jobs.append(
-            {
-                "lines": collection_lines,
-                "width": collection_width_mm * mm,
-                "height": collection_height_mm * mm,
-                "font_size": collection_font_size,
-                "line_spacing": collection_line_spacing,
-            }
-        )
+            label_jobs.append(
+                {
+                    "lines": collection_lines,
+                    "width": collection_width_mm * mm,
+                    "height": collection_height_mm * mm,
+                    "font_size": collection_font_size,
+                    "line_spacing": collection_line_spacing,
+                }
+            )
 
-        if create_determination_label:
+        if print_determination_labels:
             determination_lines = build_determination_lines(
                 row=row,
                 specimen_id_column=specimen_id_column,
@@ -2385,24 +2592,24 @@ st.subheader("8. Export")
 
 configuration_is_valid = True
 
-if not locality_columns:
+if print_collection_labels and not locality_columns:
     st.warning(
         "Select at least one location column."
     )
     configuration_is_valid = False
 
-if date_column == NOT_USED:
+if print_collection_labels and date_column == NOT_USED:
     st.warning(
         "No collection-date column is selected."
     )
 
-if collector_column == NOT_USED:
+if print_collection_labels and collector_column == NOT_USED:
     st.warning(
         "No collector column is selected."
     )
 
 if (
-    create_determination_label
+    print_determination_labels
     and not scientific_name_columns
 ):
     st.warning(
@@ -2429,7 +2636,13 @@ if configuration_is_valid:
     st.download_button(
         label="📄 Create A4 PDF",
         data=pdf_bytes,
-        file_name="entomology_labels.pdf",
+        file_name=(
+            "determination_labels.pdf"
+            if label_output_mode == "Determination labels only"
+            else "collection_labels.pdf"
+            if label_output_mode == "Collection labels only"
+            else "entomology_labels.pdf"
+        ),
         mime="application/pdf",
     )
 
@@ -2936,4 +3149,34 @@ with st.expander(
         file_name="entolabel_darwin_core.csv",
         mime="text/csv",
         key="download_darwin_core_csv",
+    )
+
+# =========================================================
+# SAVE PRESET
+# =========================================================
+
+with st.expander("💾 Save these settings as a preset", expanded=False):
+    st.caption(
+        "Download a small JSON file and upload it next time. The preset "
+        "stores settings and column names only — never specimen records."
+    )
+    preset_name = st.text_input(
+        "Preset name",
+        value="EntoLabel_preset",
+        key="preset_name",
+    ).strip() or "EntoLabel_preset"
+    safe_preset_name = "".join(
+        character if character.isalnum() or character in "-_" else "_"
+        for character in preset_name
+    ).strip("_") or "EntoLabel_preset"
+    preset_json = json.dumps(
+        build_preset_payload(), ensure_ascii=False, indent=2
+    ).encode("utf-8")
+    st.download_button(
+        label="⬇️ Download preset",
+        data=preset_json,
+        file_name=f"{safe_preset_name}.json",
+        mime="application/json",
+        key="download_preset_button",
+        use_container_width=True,
     )
