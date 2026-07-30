@@ -1864,7 +1864,7 @@ st.caption(
 # COLUMN MAPPING
 # =========================================================
 
-all_columns = selected_dataframe.columns.tolist()
+all_columns = dataframe.columns.tolist()
 optional_columns = [NOT_USED] + all_columns
 
 preset_after_header = st.session_state.pop("_preset_after_header", None)
