@@ -1585,7 +1585,7 @@ create_determination_label = labels_to_create in {
 
 print_id_on_determination_label = st.checkbox(
     "Print specimen ID on determination label",
-    value=False,
+    value=True,
     disabled=(
         not create_determination_label
         or specimen_id_column == NOT_USED
