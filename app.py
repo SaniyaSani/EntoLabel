@@ -398,7 +398,14 @@ def build_coordinates_line(
     decimal_places: int,
     coordinate_separator: str,
 ) -> str:
-    """Build one optional coordinates/altitude line."""
+    """Build a compact coordinates/altitude line.
+
+    Latitude and longitude are kept together as one non-breaking pair. This
+    prevents a narrow label from placing latitude and longitude on separate
+    visual lines merely because the separator contains a normal space.
+    Altitude may still move to the following line when the complete group is
+    too wide, which is preferable to splitting the coordinate pair itself.
+    """
 
     latitude = ""
 
@@ -421,17 +428,23 @@ def build_coordinates_line(
     altitude = ""
 
     if altitude_column != NOT_USED:
-        altitude = format_altitude(
-            row[altitude_column]
-        )
+        altitude = format_altitude(row[altitude_column])
 
-    parts = [
-        value
-        for value in (latitude, longitude, altitude)
-        if value
-    ]
+    coordinate_pair = ""
 
-    return coordinate_separator.join(parts)
+    if latitude and longitude:
+        # Replace ordinary spaces in the chosen separator with NBSP. This
+        # preserves the visible separator while keeping the coordinate pair
+        # together as one wrapping token.
+        protected_separator = coordinate_separator.replace(" ", " ")
+        coordinate_pair = f"{latitude}{protected_separator}{longitude}"
+    else:
+        coordinate_pair = latitude or longitude
+
+    if coordinate_pair and altitude:
+        return f"{coordinate_pair}{coordinate_separator}{altitude}"
+
+    return coordinate_pair or altitude
 
 
 # =========================================================
@@ -479,16 +492,23 @@ def build_collection_lines(
     )
 
     coordinates_line = ""
+    altitude_text = ""
 
     if print_coordinates:
+        # Keep latitude and longitude as their own protected pair. Altitude is
+        # packed with the date and collector below, which uses the narrow
+        # label width more efficiently than stacking every field vertically.
         coordinates_line = build_coordinates_line(
             row=row,
             latitude_column=latitude_column,
             longitude_column=longitude_column,
-            altitude_column=altitude_column,
+            altitude_column=NOT_USED,
             decimal_places=coordinate_decimal_places,
             coordinate_separator=coordinate_separator,
         )
+
+        if altitude_column != NOT_USED:
+            altitude_text = format_altitude(row[altitude_column])
 
     raw_date = (
         row[date_column]
@@ -513,9 +533,8 @@ def build_collection_lines(
 
     if specimen_id:
         if specimen_id_placement == "Compact — before first content":
-            # Keep the catalogue number at the very beginning of the label
-            # without spending a separate line. Prefer the locality line,
-            # then fall back to the next available collection-data line.
+            # Default: print the specimen ID first, but share the first useful
+            # content line instead of spending a line on the ID alone.
             if locality:
                 locality = append_inline_value(
                     specimen_id,
@@ -525,6 +544,11 @@ def build_collection_lines(
                 coordinates_line = append_inline_value(
                     specimen_id,
                     coordinates_line,
+                )
+            elif altitude_text:
+                altitude_text = append_inline_value(
+                    specimen_id,
+                    altitude_text,
                 )
             elif formatted_date:
                 formatted_date = append_inline_value(
@@ -558,6 +582,11 @@ def build_collection_lines(
                     coordinates_line,
                     specimen_id,
                 )
+            elif altitude_text:
+                altitude_text = append_inline_value(
+                    altitude_text,
+                    specimen_id,
+                )
             elif locality:
                 locality = append_inline_value(locality, specimen_id)
             else:
@@ -578,6 +607,11 @@ def build_collection_lines(
                     coordinates_line,
                     specimen_id,
                 )
+            elif altitude_text:
+                altitude_text = append_inline_value(
+                    altitude_text,
+                    specimen_id,
+                )
             elif locality:
                 locality = append_inline_value(locality, specimen_id)
             else:
@@ -594,11 +628,24 @@ def build_collection_lines(
             }
         )
 
+    # Keep the semantic blocks readable while packing the small metadata
+    # fields into one flowing line. This avoids the overly vertical pattern
+    # of altitude, date and collector each consuming a separate line.
+    metadata_line = append_inline_value(
+        altitude_text,
+        formatted_date,
+        separator=" · ",
+    )
+    metadata_line = append_inline_value(
+        metadata_line,
+        collector_line,
+        separator=" · ",
+    )
+
     for text in (
         locality,
         coordinates_line,
-        formatted_date,
-        collector_line,
+        metadata_line,
     ):
         if text:
             lines.append(
@@ -757,7 +804,9 @@ def wrap_styled_line(
         return []
 
     font_name = get_font_name(style)
-    words = text.split()
+    # Split only at ordinary spaces. Non-breaking spaces are deliberately
+    # preserved inside a token, e.g. between latitude and longitude.
+    words = [word for word in text.split(" ") if word]
 
     wrapped_lines: list[dict[str, str]] = []
     current_line = ""
@@ -779,20 +828,30 @@ def wrap_styled_line(
                 )
                 current_line = ""
 
-            pieces = split_long_word(
-                word,
-                font_name,
-                font_size,
-                maximum_width,
-            )
-
-            for piece in pieces:
+            if " " in word:
+                # Protected groups such as latitude + longitude remain whole.
+                # The fitting loop will reduce the font until the group fits.
                 wrapped_lines.append(
                     {
-                        "text": piece,
+                        "text": word,
                         "style": style,
                     }
                 )
+            else:
+                pieces = split_long_word(
+                    word,
+                    font_name,
+                    font_size,
+                    maximum_width,
+                )
+
+                for piece in pieces:
+                    wrapped_lines.append(
+                        {
+                            "text": piece,
+                            "style": style,
+                        }
+                    )
 
             continue
 
@@ -828,6 +887,17 @@ def wrap_styled_line(
                 "style": style,
             }
         )
+
+    # When a compact metadata line wraps exactly at a middle-dot separator,
+    # the line break already communicates separation. Remove a leading dot
+    # rather than displaying an orphaned punctuation mark at line start.
+    for wrapped_line in wrapped_lines:
+        cleaned = wrapped_line["text"].lstrip()
+        if cleaned.startswith("· "):
+            cleaned = cleaned[2:]
+        elif cleaned.startswith("· "):
+            cleaned = cleaned[2:]
+        wrapped_line["text"] = cleaned
 
     return wrapped_lines
 
@@ -890,7 +960,22 @@ def fit_styled_text_to_label(
             else font_size + (len(lines) - 1) * line_height
         )
 
-        if required_height <= maximum_height:
+        widest_line = max(
+            (
+                pdfmetrics.stringWidth(
+                    line["text"],
+                    get_font_name(line["style"]),
+                    font_size,
+                )
+                for line in lines
+            ),
+            default=0.0,
+        )
+
+        if (
+            required_height <= maximum_height
+            and widest_line <= maximum_width
+        ):
             return lines, font_size, True
 
         font_size -= 0.25
@@ -1430,10 +1515,10 @@ with mapping_left:
         index=0,
         disabled=specimen_id_column == NOT_USED,
         help=(
-            "The default places the ID at the very beginning of the first "
-            "content line, for example: ENT-0001 · Switzerland, Zurich. "
-            "Compact placements save one line and fall back automatically "
-            "when the preferred content field is missing."
+            "The default prints the ID at the very beginning of the first "
+            "content line, for example: A1 · Seljačke bune, Knin. Compact "
+            "placements save one line and use the next suitable field when "
+            "the preferred field is empty."
         ),
     )
 
@@ -1535,6 +1620,11 @@ with mapping_middle:
         ],
         index=0,
         disabled=not print_coordinates,
+    )
+
+    st.caption(
+        "Latitude and longitude are kept on the same printed line. "
+        "Altitude is packed with date and collector to reduce label height."
     )
 
 
