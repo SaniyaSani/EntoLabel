@@ -5,7 +5,8 @@ This build improves both onboarding and PDF label use of space.
 ## Main changes
 
 - Specimen ID placement is configurable:
-  - Compact - after date (new default)
+  - Compact - before first content (new default; e.g. `ENT-0001 · Switzerland, Zurich`)
+  - Compact - after date
   - Compact - after collector
   - Separate first line
   - Separate last line

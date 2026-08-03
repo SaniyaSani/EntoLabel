@@ -512,7 +512,33 @@ def build_collection_lines(
     separate_last_id = ""
 
     if specimen_id:
-        if specimen_id_placement == "Separate first line":
+        if specimen_id_placement == "Compact — before first content":
+            # Keep the catalogue number at the very beginning of the label
+            # without spending a separate line. Prefer the locality line,
+            # then fall back to the next available collection-data line.
+            if locality:
+                locality = append_inline_value(
+                    specimen_id,
+                    locality,
+                )
+            elif coordinates_line:
+                coordinates_line = append_inline_value(
+                    specimen_id,
+                    coordinates_line,
+                )
+            elif formatted_date:
+                formatted_date = append_inline_value(
+                    specimen_id,
+                    formatted_date,
+                )
+            elif collector_line:
+                collector_line = append_inline_value(
+                    specimen_id,
+                    collector_line,
+                )
+            else:
+                separate_first_id = specimen_id
+        elif specimen_id_placement == "Separate first line":
             separate_first_id = specimen_id
         elif specimen_id_placement == "Separate last line":
             separate_last_id = specimen_id
@@ -1394,6 +1420,7 @@ with mapping_left:
     specimen_id_placement = st.selectbox(
         "Specimen ID placement",
         options=[
+            "Compact — before first content",
             "Compact — after date",
             "Compact — after collector",
             "Separate first line",
@@ -1403,8 +1430,10 @@ with mapping_left:
         index=0,
         disabled=specimen_id_column == NOT_USED,
         help=(
-            "Compact placement saves one line. If the selected line is "
-            "missing, EntoLabel automatically uses the next suitable line."
+            "The default places the ID at the very beginning of the first "
+            "content line, for example: ENT-0001 · Switzerland, Zurich. "
+            "Compact placements save one line and fall back automatically "
+            "when the preferred content field is missing."
         ),
     )
 
