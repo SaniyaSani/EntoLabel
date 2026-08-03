@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import json
 from datetime import date, datetime, time
 from html import escape
 from io import BytesIO
 from pathlib import Path
-import re
 from typing import Any
 
 import pandas as pd
@@ -53,56 +51,6 @@ ROMAN_MONTHS = {
     11: "XI",
     12: "XII",
 }
-
-
-# =========================================================
-# PRESET SETTINGS
-# =========================================================
-
-PRESET_VERSION = 1
-PRESET_WIDGET_KEYS = ['header_row_number', 'row_ranges_text', 'specimen_id_column', 'locality_columns', 'locality_separator_option', 'latitude_column', 'longitude_column', 'altitude_column', 'date_column', 'date_format', 'collector_column', 'shorten_collector_names', 'print_coordinates', 'coordinate_decimal_places', 'coordinate_separator', 'scientific_name_columns', 'identifier_column', 'shorten_identifier_names', 'collecting_method_column', 'habitat_column', 'host_column', 'sex_column', 'life_stage_column', 'additional_details_layout', 'additional_details_separator', 'label_output_mode', 'print_id_on_determination_label', 'identification_year_mode', 'identification_year_column', 'fixed_identification_year', 'collection_width_mm', 'collection_height_mm', 'collection_font_size', 'collection_line_spacing', 'determination_width_mm', 'determination_height_mm', 'determination_font_size', 'determination_line_spacing', 'draw_borders', 'preview_excel_row', 'dwc_basis_of_record', 'dwc_occurrence_status', 'dwc_dataset_name', 'dwc_institution_code', 'dwc_collection_code', 'dwc_license_choice', 'dwc_license', 'dwc_rights_holder', 'dwc_include_empty_columns', 'dwc_event_date_column', 'dwc_recorded_by_column', 'dwc_sampling_protocol_column', 'dwc_habitat_column', 'dwc_country_column', 'dwc_country_code_column', 'dwc_state_province_column', 'dwc_county_column', 'dwc_municipality_column', 'dwc_locality_columns', 'dwc_locality_separator', 'dwc_latitude_column', 'dwc_longitude_column', 'dwc_elevation_column', 'dwc_geodetic_datum', 'dwc_coordinate_uncertainty_column', 'dwc_catalog_number_column', 'dwc_occurrence_id_mode', 'dwc_occurrence_id_column', 'dwc_occurrence_id_prefix', 'dwc_record_number_column', 'dwc_individual_count_column', 'dwc_sex_column', 'dwc_life_stage_column', 'dwc_host_column', 'dwc_preparations_column', 'dwc_occurrence_remarks_column', 'dwc_scientific_name_columns', 'dwc_identified_by_column', 'dwc_identification_date_mode', 'dwc_identification_date_column', 'dwc_identification_qualifier_column', 'dwc_taxon_rank_column', 'show_dwc_preview']
-
-PRESET_SINGLE_COLUMN_KEYS = {
-    "specimen_id_column", "latitude_column", "longitude_column",
-    "altitude_column", "date_column", "collector_column",
-    "identifier_column", "collecting_method_column", "habitat_column",
-    "host_column", "sex_column", "life_stage_column",
-    "identification_year_column", "dwc_event_date_column",
-    "dwc_recorded_by_column", "dwc_sampling_protocol_column",
-    "dwc_habitat_column", "dwc_country_column", "dwc_country_code_column",
-    "dwc_state_province_column", "dwc_county_column",
-    "dwc_municipality_column", "dwc_latitude_column",
-    "dwc_longitude_column", "dwc_elevation_column",
-    "dwc_coordinate_uncertainty_column", "dwc_catalog_number_column",
-    "dwc_occurrence_id_column", "dwc_record_number_column",
-    "dwc_individual_count_column", "dwc_sex_column",
-    "dwc_life_stage_column", "dwc_host_column",
-    "dwc_preparations_column", "dwc_occurrence_remarks_column",
-    "dwc_identified_by_column", "dwc_identification_date_column",
-    "dwc_identification_qualifier_column", "dwc_taxon_rank_column",
-}
-PRESET_MULTI_COLUMN_KEYS = {
-    "locality_columns", "scientific_name_columns",
-    "dwc_locality_columns", "dwc_scientific_name_columns",
-}
-
-def json_safe_value(value: Any) -> Any:
-    if isinstance(value, (str, int, float, bool)) or value is None:
-        return value
-    if isinstance(value, (list, tuple)):
-        return [json_safe_value(item) for item in value]
-    return str(value)
-
-def build_preset_payload() -> dict[str, Any]:
-    settings = {}
-    for key in PRESET_WIDGET_KEYS:
-        if key in st.session_state:
-            settings[key] = json_safe_value(st.session_state[key])
-    return {
-        "format": "EntoLabel preset",
-        "version": PRESET_VERSION,
-        "settings": settings,
-    }
 
 
 # =========================================================
@@ -241,80 +189,6 @@ def combine_columns(
 
 
 # =========================================================
-# EXCEL ROW RANGE PARSING
-# =========================================================
-
-def parse_excel_row_ranges(
-    range_text: str,
-    minimum_row: int,
-    maximum_row: int,
-) -> tuple[list[int], list[str]]:
-    """Parse entries such as ``10-20, 34, 41-56``.
-
-    The returned row numbers are unique and keep the order in which
-    the ranges were entered. Both ends of every range are included.
-    """
-
-    cleaned_text = (
-        range_text
-        .replace("–", "-")
-        .replace("—", "-")
-        .replace(";", ",")
-        .replace("\n", ",")
-    )
-
-    parts = [
-        part.strip()
-        for part in cleaned_text.split(",")
-        if part.strip()
-    ]
-
-    if not parts:
-        return [], ["Enter at least one Excel row or row range."]
-
-    selected_rows: list[int] = []
-    seen_rows: set[int] = set()
-    errors: list[str] = []
-
-    for part in parts:
-        single_match = re.fullmatch(r"\d+", part)
-        range_match = re.fullmatch(r"(\d+)\s*-\s*(\d+)", part)
-
-        if single_match:
-            start_row = end_row = int(part)
-        elif range_match:
-            start_row = int(range_match.group(1))
-            end_row = int(range_match.group(2))
-
-            if start_row > end_row:
-                errors.append(
-                    f'Range "{part}" runs backwards. '
-                    "Put the smaller row number first."
-                )
-                continue
-        else:
-            errors.append(
-                f'Could not understand "{part}". '
-                "Use formats such as 10-20 or 34."
-            )
-            continue
-
-        if start_row < minimum_row or end_row > maximum_row:
-            errors.append(
-                f'"{part}" is outside the available data rows '
-                f"{minimum_row}-{maximum_row}."
-            )
-            continue
-
-        for excel_row in range(start_row, end_row + 1):
-            if excel_row not in seen_rows:
-                selected_rows.append(excel_row)
-                seen_rows.add(excel_row)
-
-    return selected_rows, errors
-
-
-# =========================================================
 # DATE FORMATTING
 # =========================================================
 
@@ -446,99 +320,6 @@ def format_people(
     return ", ".join(people)
 
 
-def normalize_sex(value: Any) -> str:
-    """Convert common sex values to compact biological symbols."""
-
-    text = clean_value(value)
-
-    if not text:
-        return ""
-
-    normalized = re.sub(r"[._-]+", " ", text.lower()).strip()
-
-    male_values = {
-        "m",
-        "male",
-        "mannlich",
-        "männlich",
-        "masculine",
-        "♂",
-    }
-    female_values = {
-        "f",
-        "female",
-        "weiblich",
-        "feminine",
-        "♀",
-    }
-
-    if normalized in male_values:
-        return "♂"
-
-    if normalized in female_values:
-        return "♀"
-
-    return text
-
-
-def build_additional_specimen_lines(
-    row: pd.Series,
-    collecting_method_column: str,
-    habitat_column: str,
-    host_column: str,
-    sex_column: str,
-    life_stage_column: str,
-    layout: str,
-    separator: str,
-) -> list[dict[str, str]]:
-    """Build optional method, ecology, sex, and life-stage text."""
-
-    collecting_method = get_value(row, collecting_method_column)
-    habitat = get_value(row, habitat_column)
-    host = get_value(row, host_column)
-    sex = normalize_sex(get_value(row, sex_column))
-    life_stage = get_value(row, life_stage_column)
-
-    labelled_parts: list[str] = []
-
-    if collecting_method:
-        labelled_parts.append(f"method: {collecting_method}")
-
-    if habitat:
-        labelled_parts.append(f"hab.: {habitat}")
-
-    if host:
-        labelled_parts.append(f"host: {host}")
-
-    specimen_state = " ".join(
-        part
-        for part in (sex, life_stage)
-        if part
-    )
-
-    if specimen_state:
-        labelled_parts.append(specimen_state)
-
-    if not labelled_parts:
-        return []
-
-    if layout == "Separate line for each field":
-        return [
-            {
-                "text": part,
-                "style": "regular",
-            }
-            for part in labelled_parts
-        ]
-
-    return [
-        {
-            "text": separator.join(labelled_parts),
-            "style": "regular",
-        }
-    ]
-
-
 # =========================================================
 # COORDINATE FORMATTING
 # =========================================================
@@ -657,9 +438,23 @@ def build_coordinates_line(
 # LABEL DATA BUILDERS
 # =========================================================
 
+def append_inline_value(
+    base_text: str,
+    extra_text: str,
+    separator: str = " · ",
+) -> str:
+    """Join two label values without wasting a separate line."""
+
+    if base_text and extra_text:
+        return f"{base_text}{separator}{extra_text}"
+
+    return base_text or extra_text
+
+
 def build_collection_lines(
     row: pd.Series,
     specimen_id_column: str,
+    specimen_id_placement: str,
     locality_columns: list[str],
     locality_separator: str,
     latitude_column: str,
@@ -672,15 +467,8 @@ def build_collection_lines(
     date_format: str,
     collector_column: str,
     shorten_collector_names: bool,
-    collecting_method_column: str,
-    habitat_column: str,
-    host_column: str,
-    sex_column: str,
-    life_stage_column: str,
-    additional_details_layout: str,
-    additional_details_separator: str,
 ) -> list[dict[str, str]]:
-    """Build the main collection label."""
+    """Build a compact collection label with configurable ID placement."""
 
     specimen_id = get_value(row, specimen_id_column)
 
@@ -719,60 +507,88 @@ def build_collection_lines(
         shorten_first_names=shorten_collector_names,
     )
 
-    additional_specimen_lines = build_additional_specimen_lines(
-        row=row,
-        collecting_method_column=collecting_method_column,
-        habitat_column=habitat_column,
-        host_column=host_column,
-        sex_column=sex_column,
-        life_stage_column=life_stage_column,
-        layout=additional_details_layout,
-        separator=additional_details_separator,
-    )
+    collector_line = f"leg. {collectors}" if collectors else ""
+    separate_first_id = ""
+    separate_last_id = ""
+
+    if specimen_id:
+        if specimen_id_placement == "Separate first line":
+            separate_first_id = specimen_id
+        elif specimen_id_placement == "Separate last line":
+            separate_last_id = specimen_id
+        elif specimen_id_placement == "Compact — after collector":
+            if collector_line:
+                collector_line = append_inline_value(
+                    collector_line,
+                    specimen_id,
+                )
+            elif formatted_date:
+                formatted_date = append_inline_value(
+                    formatted_date,
+                    specimen_id,
+                )
+            elif coordinates_line:
+                coordinates_line = append_inline_value(
+                    coordinates_line,
+                    specimen_id,
+                )
+            elif locality:
+                locality = append_inline_value(locality, specimen_id)
+            else:
+                separate_last_id = specimen_id
+        elif specimen_id_placement == "Compact — after date":
+            if formatted_date:
+                formatted_date = append_inline_value(
+                    formatted_date,
+                    specimen_id,
+                )
+            elif collector_line:
+                collector_line = append_inline_value(
+                    collector_line,
+                    specimen_id,
+                )
+            elif coordinates_line:
+                coordinates_line = append_inline_value(
+                    coordinates_line,
+                    specimen_id,
+                )
+            elif locality:
+                locality = append_inline_value(locality, specimen_id)
+            else:
+                separate_last_id = specimen_id
+        # "Do not print" intentionally leaves the ID out.
 
     lines: list[dict[str, str]] = []
 
-    if specimen_id:
+    if separate_first_id:
         lines.append(
             {
-                "text": specimen_id,
+                "text": separate_first_id,
                 "style": "bold",
             }
         )
 
-    if locality:
+    for text in (
+        locality,
+        coordinates_line,
+        formatted_date,
+        collector_line,
+    ):
+        if text:
+            lines.append(
+                {
+                    "text": text,
+                    "style": "regular",
+                }
+            )
+
+    if separate_last_id:
         lines.append(
             {
-                "text": locality,
-                "style": "regular",
+                "text": separate_last_id,
+                "style": "bold",
             }
         )
-
-    if coordinates_line:
-        lines.append(
-            {
-                "text": coordinates_line,
-                "style": "regular",
-            }
-        )
-
-    if formatted_date:
-        lines.append(
-            {
-                "text": formatted_date,
-                "style": "regular",
-            }
-        )
-
-    if collectors:
-        lines.append(
-            {
-                "text": f"leg. {collectors}",
-                "style": "regular",
-            }
-        )
-
-    lines.extend(additional_specimen_lines)
 
     return lines
 
@@ -851,501 +667,6 @@ def build_determination_lines(
         )
 
     return lines
-
-
-# =========================================================
-# DARWIN CORE EXPORT HELPERS
-# =========================================================
-
-def option_index(
-    options: list[str],
-    preferred_value: str,
-) -> int:
-    """Return a safe selectbox index for a preferred value."""
-
-    try:
-        return options.index(preferred_value)
-    except ValueError:
-        return 0
-
-
-def format_dwc_date(value: Any) -> str:
-    """Format a date as an ISO 8601 value when possible."""
-
-    if value is None:
-        return ""
-
-    try:
-        if pd.isna(value):
-            return ""
-    except (TypeError, ValueError):
-        pass
-
-    if isinstance(value, pd.Timestamp):
-        return value.date().isoformat()
-
-    if isinstance(value, datetime):
-        return value.date().isoformat()
-
-    if isinstance(value, date):
-        return value.isoformat()
-
-    text = str(value).strip()
-
-    if not text:
-        return ""
-
-    # Years, year-month values, full ISO dates, and ISO intervals can
-    # already be valid Darwin Core eventDate/dateIdentified values.
-    if re.fullmatch(
-        r"\d{4}(?:-\d{2}(?:-\d{2})?)?"
-        r"(?:[T ][^/]+)?(?:/.*)?",
-        text,
-    ):
-        return text.replace(" ", "T", 1) if " " in text else text
-
-    parsed_date = parse_date_value(value)
-
-    if parsed_date is None:
-        return text
-
-    return parsed_date.date().isoformat()
-
-
-def format_dwc_people(value: Any) -> str:
-    """Format a list of people using the Darwin Core list separator."""
-
-    text = clean_value(value)
-
-    if not text:
-        return ""
-
-    people = [
-        person.strip()
-        for person in re.split(r"\s*[;,|]\s*", text)
-        if person.strip()
-    ]
-
-    return " | ".join(people)
-
-
-def normalize_dwc_sex(value: Any) -> str:
-    """Normalize common sex values to readable Darwin Core values."""
-
-    text = clean_value(value)
-
-    if not text:
-        return ""
-
-    normalized = re.sub(r"[._-]+", " ", text.lower()).strip()
-
-    if normalized in {
-        "m",
-        "male",
-        "mannlich",
-        "männlich",
-        "masculine",
-        "♂",
-    }:
-        return "male"
-
-    if normalized in {
-        "f",
-        "female",
-        "weiblich",
-        "feminine",
-        "♀",
-    }:
-        return "female"
-
-    if normalized in {
-        "hermaphrodite",
-        "hermaphroditic",
-        "zwitter",
-    }:
-        return "hermaphrodite"
-
-    return text
-
-
-def format_decimal_number(value: Any) -> str:
-    """Return a compact decimal number or an empty string."""
-
-    number = parse_coordinate(value)
-
-    if number is None:
-        return ""
-
-    return f"{number:.10f}".rstrip("0").rstrip(".")
-
-
-def extract_numeric_value(value: Any) -> str:
-    """Extract the first number from values such as '320 m'."""
-
-    text = clean_value(value).replace(",", ".")
-
-    if not text:
-        return ""
-
-    match = re.search(r"[-+]?\d+(?:\.\d+)?", text)
-
-    if match is None:
-        return ""
-
-    try:
-        number = float(match.group(0))
-    except ValueError:
-        return ""
-
-    return f"{number:.10f}".rstrip("0").rstrip(".")
-
-
-def format_associated_host(value: Any) -> str:
-    """Represent a host relationship in dwc:associatedTaxa."""
-
-    host = clean_value(value)
-
-    if not host:
-        return ""
-
-    safe_host = host.replace('"', "'")
-    return f'"host":"{safe_host}"'
-
-
-def get_raw_value(
-    row: pd.Series,
-    column_name: str,
-) -> Any:
-    """Return the original cell value from an optional column."""
-
-    if column_name == NOT_USED:
-        return ""
-
-    if column_name not in row.index:
-        return ""
-
-    return row[column_name]
-
-
-def build_dwc_occurrence_id(
-    row: pd.Series,
-    settings: dict[str, Any],
-    catalog_number: str,
-) -> str:
-    """Build occurrenceID according to the selected strategy."""
-
-    mode = settings["occurrence_id_mode"]
-
-    if mode == "Use an Excel column":
-        return get_value(
-            row,
-            settings["occurrence_id_column"],
-        )
-
-    if mode == "Prefix + catalogNumber":
-        prefix = settings["occurrence_id_prefix"].strip()
-
-        if prefix and catalog_number:
-            return f"{prefix}{catalog_number}"
-
-        return ""
-
-    if mode == "Use catalogNumber directly":
-        return catalog_number
-
-    return ""
-
-
-def build_dwc_identification_date(
-    row: pd.Series,
-    settings: dict[str, Any],
-) -> str:
-    """Build dateIdentified from the selected Darwin Core setting."""
-
-    mode = settings["identification_date_mode"]
-
-    if mode == "Use an Excel column":
-        return format_dwc_date(
-            get_raw_value(
-                row,
-                settings["identification_date_column"],
-            )
-        )
-
-    if mode == "Use current determination settings":
-        current_mode = settings["current_identification_year_mode"]
-
-        if current_mode == "Column from Excel":
-            return format_dwc_date(
-                get_raw_value(
-                    row,
-                    settings["current_identification_year_column"],
-                )
-            )
-
-        if current_mode == "One year for all labels":
-            return format_dwc_date(
-                settings["current_fixed_identification_year"]
-            )
-
-    return ""
-
-
-def create_darwin_core_dataframe(
-    data: pd.DataFrame,
-    settings: dict[str, Any],
-) -> pd.DataFrame:
-    """Create a flat Simple Darwin Core table from selected records."""
-
-    records: list[dict[str, str]] = []
-
-    for _, row in data.iterrows():
-        catalog_number = get_value(
-            row,
-            settings["catalog_number_column"],
-        )
-
-        raw_event_date = get_raw_value(
-            row,
-            settings["event_date_column"],
-        )
-
-        locality = combine_columns(
-            row,
-            settings["locality_columns"],
-            separator=settings["locality_separator"],
-        )
-
-        scientific_name = combine_columns(
-            row,
-            settings["scientific_name_columns"],
-            separator=" ",
-        )
-
-        raw_elevation = get_raw_value(
-            row,
-            settings["elevation_column"],
-        )
-
-        record = {
-            "basisOfRecord": settings["basis_of_record"],
-            "datasetName": settings["dataset_name"].strip(),
-            "institutionCode": settings["institution_code"].strip(),
-            "collectionCode": settings["collection_code"].strip(),
-            "license": settings["license"].strip(),
-            "rightsHolder": settings["rights_holder"].strip(),
-            "catalogNumber": catalog_number,
-            "occurrenceID": build_dwc_occurrence_id(
-                row=row,
-                settings=settings,
-                catalog_number=catalog_number,
-            ),
-            "recordNumber": get_value(
-                row,
-                settings["record_number_column"],
-            ),
-            "occurrenceStatus": settings["occurrence_status"],
-            "recordedBy": format_dwc_people(
-                get_raw_value(
-                    row,
-                    settings["recorded_by_column"],
-                )
-            ),
-            "individualCount": get_value(
-                row,
-                settings["individual_count_column"],
-            ),
-            "sex": normalize_dwc_sex(
-                get_raw_value(
-                    row,
-                    settings["sex_column"],
-                )
-            ),
-            "lifeStage": get_value(
-                row,
-                settings["life_stage_column"],
-            ),
-            "preparations": get_value(
-                row,
-                settings["preparations_column"],
-            ),
-            "associatedTaxa": format_associated_host(
-                get_raw_value(
-                    row,
-                    settings["host_column"],
-                )
-            ),
-            "eventDate": format_dwc_date(raw_event_date),
-            "verbatimEventDate": clean_value(raw_event_date),
-            "samplingProtocol": get_value(
-                row,
-                settings["sampling_protocol_column"],
-            ),
-            "habitat": get_value(
-                row,
-                settings["habitat_column"],
-            ),
-            "country": get_value(
-                row,
-                settings["country_column"],
-            ),
-            "countryCode": get_value(
-                row,
-                settings["country_code_column"],
-            ),
-            "stateProvince": get_value(
-                row,
-                settings["state_province_column"],
-            ),
-            "county": get_value(
-                row,
-                settings["county_column"],
-            ),
-            "municipality": get_value(
-                row,
-                settings["municipality_column"],
-            ),
-            "locality": locality,
-            "decimalLatitude": format_decimal_number(
-                get_raw_value(
-                    row,
-                    settings["latitude_column"],
-                )
-            ),
-            "decimalLongitude": format_decimal_number(
-                get_raw_value(
-                    row,
-                    settings["longitude_column"],
-                )
-            ),
-            "geodeticDatum": settings["geodetic_datum"].strip(),
-            "coordinateUncertaintyInMeters": extract_numeric_value(
-                get_raw_value(
-                    row,
-                    settings["coordinate_uncertainty_column"],
-                )
-            ),
-            "minimumElevationInMeters": extract_numeric_value(
-                raw_elevation
-            ),
-            "maximumElevationInMeters": extract_numeric_value(
-                raw_elevation
-            ),
-            "verbatimElevation": clean_value(raw_elevation),
-            "scientificName": scientific_name,
-            "taxonRank": get_value(
-                row,
-                settings["taxon_rank_column"],
-            ),
-            "identificationQualifier": get_value(
-                row,
-                settings["identification_qualifier_column"],
-            ),
-            "identifiedBy": format_dwc_people(
-                get_raw_value(
-                    row,
-                    settings["identified_by_column"],
-                )
-            ),
-            "dateIdentified": build_dwc_identification_date(
-                row=row,
-                settings=settings,
-            ),
-            "occurrenceRemarks": get_value(
-                row,
-                settings["occurrence_remarks_column"],
-            ),
-        }
-
-        records.append(record)
-
-    result = pd.DataFrame(records)
-
-    if not settings["include_empty_columns"]:
-        non_empty_columns = [
-            column
-            for column in result.columns
-            if result[column].astype(str).str.strip().ne("").any()
-        ]
-        result = result[non_empty_columns]
-
-    return result.fillna("")
-
-
-def darwin_core_validation_messages(
-    data: pd.DataFrame,
-) -> list[tuple[str, str]]:
-    """Return lightweight quality messages for the Darwin Core export."""
-
-    messages: list[tuple[str, str]] = []
-
-    if "catalogNumber" in data.columns:
-        catalog_numbers = data["catalogNumber"].astype(str).str.strip()
-        non_empty_catalog_numbers = catalog_numbers[catalog_numbers.ne("")]
-        missing_count = int(catalog_numbers.eq("").sum())
-        duplicate_count = int(non_empty_catalog_numbers.duplicated().sum())
-
-        if missing_count:
-            messages.append(
-                (
-                    "warning",
-                    f"{missing_count} record(s) have no catalogNumber.",
-                )
-            )
-
-        if duplicate_count:
-            messages.append(
-                (
-                    "warning",
-                    f"{duplicate_count} duplicate catalogNumber value(s) were found.",
-                )
-            )
-
-    if "occurrenceID" in data.columns:
-        occurrence_ids = data["occurrenceID"].astype(str).str.strip()
-        non_empty_occurrence_ids = occurrence_ids[occurrence_ids.ne("")]
-        duplicate_occurrence_ids = int(
-            non_empty_occurrence_ids.duplicated().sum()
-        )
-
-        if occurrence_ids.eq("").all():
-            messages.append(
-                (
-                    "info",
-                    "occurrenceID is empty. That is allowed for a draft export, "
-                    "but a stable globally unique identifier is recommended "
-                    "before publication.",
-                )
-            )
-
-        if duplicate_occurrence_ids:
-            messages.append(
-                (
-                    "warning",
-                    f"{duplicate_occurrence_ids} duplicate occurrenceID value(s) "
-                    "were found.",
-                )
-            )
-
-    for column, label in (
-        ("eventDate", "eventDate"),
-        ("scientificName", "scientificName"),
-        ("locality", "locality"),
-    ):
-        if column in data.columns:
-            missing_count = int(
-                data[column].astype(str).str.strip().eq("").sum()
-            )
-
-            if missing_count:
-                messages.append(
-                    (
-                        "info",
-                        f"{missing_count} record(s) have no {label}.",
-                    )
-                )
-
-    return messages
 
 
 # =========================================================
@@ -1514,10 +835,20 @@ def fit_styled_text_to_label(
     maximum_width: float,
     maximum_height: float,
     line_spacing: float,
+    automatically_enlarge: bool = False,
+    maximum_font_size: float | None = None,
 ) -> tuple[list[dict[str, str]], float, bool]:
-    """Reduce the font size until the label fits."""
+    """Choose the largest allowed font size that still fits the label."""
 
-    font_size = preferred_font_size
+    start_font_size = preferred_font_size
+
+    if automatically_enlarge and maximum_font_size is not None:
+        start_font_size = max(
+            preferred_font_size,
+            maximum_font_size,
+        )
+
+    font_size = start_font_size
 
     while font_size >= minimum_font_size:
         lines = prepare_styled_lines(
@@ -1527,7 +858,11 @@ def fit_styled_text_to_label(
         )
 
         line_height = font_size * line_spacing
-        required_height = len(lines) * line_height
+        required_height = (
+            0.0
+            if not lines
+            else font_size + (len(lines) - 1) * line_height
+        )
 
         if required_height <= maximum_height:
             return lines, font_size, True
@@ -1574,15 +909,39 @@ def render_live_label(
     width_mm: float,
     height_mm: float,
     font_size_pt: float,
+    line_spacing: float,
+    automatically_enlarge: bool,
+    maximum_font_size_pt: float,
+    vertical_alignment: str,
 ) -> None:
-    """Draw an approximate label preview in Streamlit."""
+    """Draw a preview using the same wrapping and fitting logic as the PDF."""
 
     preview_scale = 4.3
+    preview_padding_pt = 0.45 * mm
 
     width_px = max(int(width_mm * preview_scale), 90)
     height_px = max(int(height_mm * preview_scale), 45)
 
-    html_content = lines_to_html(lines)
+    available_width = max((width_mm * mm) - 2 * preview_padding_pt, 1)
+    available_height = max((height_mm * mm) - 2 * preview_padding_pt, 1)
+
+    prepared_lines, actual_font_size, _ = fit_styled_text_to_label(
+        raw_lines=lines,
+        preferred_font_size=font_size_pt,
+        minimum_font_size=3.0,
+        maximum_width=available_width,
+        maximum_height=available_height,
+        line_spacing=line_spacing,
+        automatically_enlarge=automatically_enlarge,
+        maximum_font_size=maximum_font_size_pt,
+    )
+
+    html_content = lines_to_html(prepared_lines)
+    justify_content = (
+        "center"
+        if vertical_alignment == "Balanced"
+        else "flex-start"
+    )
 
     st.markdown(f"**{escape(title)}**")
 
@@ -1594,66 +953,221 @@ def render_live_label(
             border: 1px solid #555;
             background: white;
             color: black;
-            padding: 6px;
+            padding: 3px;
             overflow: hidden;
             font-family: Arial, Helvetica, sans-serif;
-            font-size: {max(font_size_pt * 1.45, 8)}px;
-            line-height: 1.08;
+            font-size: {max(actual_font_size * 1.45, 8)}px;
+            line-height: {line_spacing};
             box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            justify-content: {justify_content};
         ">
-            {html_content}
+            <div>{html_content}</div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
+    st.caption(f"Preview font: {actual_font_size:.2f} pt")
+
 
 # =========================================================
-# EXAMPLE SPREADSHEET
+# ONBOARDING AND FILE UPLOAD
 # =========================================================
 
-with st.expander("✨ New to EntoLabel?", expanded=False):
-    st.write(
-        "Download a ready-to-use example spreadsheet with sample records "
-        "and a short field guide. You can replace the example data with "
-        "your own and keep only the columns you need."
-    )
+def normalize_heading(value: Any) -> str:
+    """Normalise a column heading for safe automatic matching."""
 
-    example_spreadsheet_path = (
-        Path(__file__).resolve().parent / "EntoLabel_example.xlsx"
-    )
+    text = clean_value(value).casefold()
+    return "".join(character for character in text if character.isalnum())
 
-    if example_spreadsheet_path.exists():
-        st.download_button(
-            label="⬇️ Download example spreadsheet",
-            data=example_spreadsheet_path.read_bytes(),
-            file_name="EntoLabel_example.xlsx",
-            mime=(
-                "application/vnd.openxmlformats-officedocument."
-                "spreadsheetml.sheet"
-            ),
-            help=(
-                "The first sheet contains example specimen data. "
-                "The second sheet explains the columns."
-            ),
+
+def suggest_column(
+    columns: list[str],
+    aliases: list[str],
+) -> str:
+    """Return the first column matching one of the expected aliases."""
+
+    normalized_columns = {
+        normalize_heading(column): column
+        for column in columns
+    }
+
+    for alias in aliases:
+        exact_match = normalized_columns.get(normalize_heading(alias))
+        if exact_match:
+            return exact_match
+
+    # A conservative partial match helps with headings such as
+    # "Elevation (m)" without confusing unrelated short headings.
+    for alias in aliases:
+        normalized_alias = normalize_heading(alias)
+        if len(normalized_alias) < 4:
+            continue
+
+        for normalized_column, original_column in normalized_columns.items():
+            if (
+                normalized_alias in normalized_column
+                or normalized_column in normalized_alias
+            ):
+                return original_column
+
+    return NOT_USED
+
+
+def detect_header_row(raw_data: pd.DataFrame) -> int:
+    """Suggest a likely 1-based header row from the first 20 rows."""
+
+    known_headings = {
+        normalize_heading(value)
+        for value in [
+            "Specimen ID",
+            "Catalogue number",
+            "Country",
+            "Region",
+            "Locality",
+            "Latitude",
+            "Longitude",
+            "Elevation",
+            "Altitude",
+            "Collection date",
+            "Date",
+            "Collector",
+            "Scientific name",
+            "Taxon",
+            "Genus",
+            "Species",
+            "Determined by",
+            "Identifier",
+        ]
+    }
+
+    best_index = 0
+    best_score = -1.0
+
+    for index in range(min(len(raw_data), 20)):
+        values = [
+            clean_value(value)
+            for value in raw_data.iloc[index].tolist()
+        ]
+        nonempty_values = [value for value in values if value]
+
+        if not nonempty_values:
+            continue
+
+        normalized_values = {
+            normalize_heading(value)
+            for value in nonempty_values
+        }
+        known_matches = len(normalized_values & known_headings)
+        text_values = sum(
+            any(character.isalpha() for character in value)
+            for value in nonempty_values
         )
-    else:
-        st.caption(
-            "The example spreadsheet is not included in this deployment."
-        )
+        uniqueness = len(set(nonempty_values)) / len(nonempty_values)
+
+        score = known_matches * 10 + text_values + uniqueness
+
+        if score > best_score:
+            best_score = score
+            best_index = index
+
+    return best_index + 1
 
 
-# =========================================================
-# FILE UPLOAD
-# =========================================================
+st.markdown("### Start with your own collection data")
+st.caption(
+    "EntoLabel now suggests common column mappings automatically. "
+    "You can review every suggestion before creating the PDF."
+)
+
+onboarding_columns = st.columns(3)
+with onboarding_columns[0]:
+    st.markdown("**1. Upload**  \nExcel or CSV; your headings do not need to use exactly the same names.")
+with onboarding_columns[1]:
+    st.markdown("**2. Review mapping**  \nEntoLabel matches locality, date, collector, taxon and ID fields.")
+with onboarding_columns[2]:
+    st.markdown("**3. Preview and export**  \nCheck the real label layout before downloading the A4 PDF.")
+
+template_columns = [
+    "Specimen ID",
+    "Taxon",
+    "Country",
+    "Region",
+    "Locality",
+    "Latitude",
+    "Longitude",
+    "Elevation (m)",
+    "Collection date",
+    "Collector",
+    "Determined by",
+]
+
+empty_template = pd.DataFrame(columns=template_columns)
+example_template = pd.DataFrame(
+    [
+        {
+            "Specimen ID": "AUR-0001",
+            "Taxon": "Carabus auratus",
+            "Country": "Aurelia",
+            "Region": "Mossreach",
+            "Locality": "Moonfern Hollow",
+            "Latitude": 47.2015,
+            "Longitude": 8.5142,
+            "Elevation (m)": 612,
+            "Collection date": "2026-04-03",
+            "Collector": "Mira Solberg",
+            "Determined by": "Elian Voss",
+        },
+        {
+            "Specimen ID": "AUR-0002",
+            "Taxon": "Lucilia sericata",
+            "Country": "Aurelia",
+            "Region": "Silverfen",
+            "Locality": "Glasswing Meadow",
+            "Latitude": 47.1842,
+            "Longitude": 8.5371,
+            "Elevation (m)": 548,
+            "Collection date": "2026-05-19",
+            "Collector": "Nora Vale",
+            "Determined by": "Elian Voss",
+        },
+    ]
+)
+
+template_downloads = st.columns(2)
+with template_downloads[0]:
+    st.download_button(
+        "Download empty CSV template",
+        data=empty_template.to_csv(index=False).encode("utf-8-sig"),
+        file_name="EntoLabel_empty_template.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
+with template_downloads[1]:
+    st.download_button(
+        "Download fictional example",
+        data=example_template.to_csv(index=False).encode("utf-8-sig"),
+        file_name="EntoLabel_fictional_example.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
 
 uploaded_file = st.file_uploader(
-    "Upload Excel or CSV file",
+    "Upload your Excel or CSV file",
     type=["xlsx", "xls", "csv"],
+    help=(
+        "The first row normally contains column names. If your file begins "
+        "with notes or a title, EntoLabel will suggest another header row."
+    ),
 )
 
 if uploaded_file is None:
-    st.info("Upload an Excel or CSV file to begin.")
+    st.info(
+        "Upload your own file, or download the template above to see the "
+        "recommended structure."
+    )
     st.stop()
 
 
@@ -1675,84 +1189,23 @@ if raw_dataframe.empty:
 
 
 # =========================================================
-# LOAD PRESET
-# =========================================================
-
-with st.expander("💾 Load a saved preset — optional", expanded=False):
-    st.caption(
-        "A preset restores column mappings, label dimensions, formatting, "
-        "row selection and Darwin Core settings. It does not contain "
-        "specimen data."
-    )
-    preset_upload = st.file_uploader(
-        "Upload EntoLabel preset",
-        type=["json"],
-        key="preset_upload",
-    )
-    apply_preset_button = st.button(
-        "Apply preset",
-        disabled=preset_upload is None,
-        key="apply_preset_button",
-    )
-    if apply_preset_button and preset_upload is not None:
-        try:
-            preset_payload = json.loads(
-                preset_upload.getvalue().decode("utf-8-sig")
-            )
-            preset_settings = preset_payload.get("settings", preset_payload)
-            if not isinstance(preset_settings, dict):
-                raise ValueError("Preset settings must be a JSON object.")
-            st.session_state["_pending_entolabel_preset"] = preset_settings
-            st.rerun()
-        except Exception as error:
-            st.error(f"Could not load the preset: {error}")
-
-if "_preset_flash_message" in st.session_state:
-    st.success(st.session_state.pop("_preset_flash_message"))
-
-pending_preset = st.session_state.pop("_pending_entolabel_preset", None)
-if pending_preset is not None:
-    saved_header_row = pending_preset.get("header_row_number")
-    if isinstance(saved_header_row, (int, float)):
-        st.session_state["header_row_number"] = max(
-            1, min(int(saved_header_row), len(raw_dataframe))
-        )
-
-    # Static settings can be restored immediately, before their widgets are
-    # created. Column mappings are restored later, once this file's headings
-    # are known and can be validated.
-    column_setting_keys = (
-        PRESET_SINGLE_COLUMN_KEYS | PRESET_MULTI_COLUMN_KEYS
-    )
-    for key, value in pending_preset.items():
-        if key == "header_row_number" or key in column_setting_keys:
-            continue
-        st.session_state[key] = value
-
-    st.session_state["_preset_after_header"] = {
-        key: value
-        for key, value in pending_preset.items()
-        if key in column_setting_keys
-    }
-
-
-# =========================================================
 # HEADER ROW
 # =========================================================
 
 st.subheader("1. Table header")
 
+suggested_header_row = detect_header_row(raw_dataframe)
+
 header_row_number = st.number_input(
     "Excel row containing the column names",
     min_value=1,
     max_value=len(raw_dataframe),
-    value=1,
+    value=int(suggested_header_row),
     step=1,
     help=(
         "Usually this is row 1. If your file begins with a title or notes, "
         "choose the row where the actual table headings begin."
     ),
-    key="header_row_number",
 )
 
 header_index = int(header_row_number) - 1
@@ -1809,54 +1262,36 @@ st.subheader("3. Select Excel rows")
 first_data_excel_row = int(header_row_number) + 1
 last_excel_row = len(raw_dataframe)
 
-default_row_ranges = f"{first_data_excel_row}-{last_excel_row}"
+row_selection_columns = st.columns(2)
 
-row_ranges_text = st.text_input(
-    "Excel rows to print",
-    value=default_row_ranges,
-    key=(
-        f"row_ranges_{uploaded_file.name}_"
-        f"{int(header_row_number)}_{len(raw_dataframe)}"
-    ),
-    placeholder="10-20, 34, 41-56, 72",
-    help=(
-        "Enter individual Excel rows and/or inclusive ranges, separated "
-        "by commas. Example: 10-20, 34, 41-56, 72."
-    ),
-)
-
-selected_excel_rows, row_selection_errors = parse_excel_row_ranges(
-    range_text=row_ranges_text,
-    minimum_row=first_data_excel_row,
-    maximum_row=last_excel_row,
-)
-
-if row_selection_errors:
-    for error_message in row_selection_errors:
-        st.error(error_message)
-    st.stop()
-
-selected_positions = [
-    excel_row - first_data_excel_row
-    for excel_row in selected_excel_rows
-]
-
-dataframe = dataframe.iloc[selected_positions].reset_index(drop=True)
-
-if len(selected_excel_rows) <= 20:
-    selected_rows_summary = ", ".join(
-        str(row_number)
-        for row_number in selected_excel_rows
+with row_selection_columns[0]:
+    start_excel_row = st.number_input(
+        "From Excel row",
+        min_value=first_data_excel_row,
+        max_value=last_excel_row,
+        value=first_data_excel_row,
+        step=1,
     )
-else:
-    selected_rows_summary = (
-        f"{selected_excel_rows[0]} ... {selected_excel_rows[-1]}"
+
+with row_selection_columns[1]:
+    end_excel_row = st.number_input(
+        "To Excel row",
+        min_value=int(start_excel_row),
+        max_value=last_excel_row,
+        value=last_excel_row,
+        step=1,
     )
+
+start_position = int(start_excel_row) - first_data_excel_row
+end_position = int(end_excel_row) - first_data_excel_row
+
+dataframe = dataframe.iloc[start_position:end_position + 1].reset_index(
+    drop=True
+)
 
 st.caption(
-    f"Selected {len(dataframe)} row(s). "
-    f"Excel rows: {selected_rows_summary}. "
-    "Overlapping ranges are printed only once."
+    f"Selected {len(dataframe)} row(s): "
+    f"Excel rows {int(start_excel_row)}–{int(end_excel_row)}."
 )
 
 
@@ -1867,35 +1302,80 @@ st.caption(
 all_columns = dataframe.columns.tolist()
 optional_columns = [NOT_USED] + all_columns
 
-preset_after_header = st.session_state.pop("_preset_after_header", None)
-if preset_after_header is not None:
-    skipped_columns = []
-    for key, value in preset_after_header.items():
-        if key in {"header_row_number", "preset_upload", "apply_preset_button"}:
-            continue
-        if key in PRESET_SINGLE_COLUMN_KEYS:
-            if value not in optional_columns:
-                if value not in (None, "", NOT_USED):
-                    skipped_columns.append(str(value))
-                value = NOT_USED
-        elif key in PRESET_MULTI_COLUMN_KEYS:
-            if not isinstance(value, list):
-                value = []
-            skipped_columns.extend(
-                str(item) for item in value if item not in all_columns
-            )
-            value = [item for item in value if item in all_columns]
-        st.session_state[key] = value
-    message = "Preset applied."
-    if skipped_columns:
-        message += (
-            " Some saved columns were not found and were left unassigned: "
-            + ", ".join(sorted(set(skipped_columns)))
-        )
-    st.session_state["_preset_flash_message"] = message
-    st.rerun()
+suggested_specimen_id = suggest_column(
+    all_columns,
+    [
+        "Specimen ID",
+        "Catalogue number",
+        "Catalog number",
+        "Accession number",
+        "Specimen number",
+    ],
+)
+suggested_latitude = suggest_column(
+    all_columns,
+    ["Latitude", "Decimal latitude", "Lat"],
+)
+suggested_longitude = suggest_column(
+    all_columns,
+    ["Longitude", "Decimal longitude", "Lon", "Lng"],
+)
+suggested_altitude = suggest_column(
+    all_columns,
+    ["Elevation (m)", "Elevation", "Altitude (m)", "Altitude"],
+)
+suggested_date = suggest_column(
+    all_columns,
+    ["Collection date", "Date collected", "Event date", "Date"],
+)
+suggested_collector = suggest_column(
+    all_columns,
+    ["Collector", "Collectors", "Collected by", "Recorded by"],
+)
+suggested_identifier = suggest_column(
+    all_columns,
+    ["Determined by", "Identified by", "Determiner", "Identifier"],
+)
+
+suggested_locality_columns = []
+for aliases in [
+    ["Country"],
+    ["Region", "State", "Province", "Canton", "County", "District"],
+    ["Locality", "Site", "Location", "Verbatim locality"],
+]:
+    suggestion = suggest_column(all_columns, aliases)
+    if (
+        suggestion != NOT_USED
+        and suggestion not in suggested_locality_columns
+    ):
+        suggested_locality_columns.append(suggestion)
+
+suggested_scientific_name_columns = []
+combined_taxon_column = suggest_column(
+    all_columns,
+    ["Scientific name", "Taxon", "Taxon name"],
+)
+
+if combined_taxon_column != NOT_USED:
+    suggested_scientific_name_columns = [combined_taxon_column]
+else:
+    for aliases in [
+        ["Genus"],
+        ["Qualifier", "Identification qualifier"],
+        ["Species", "Specific epithet"],
+    ]:
+        suggestion = suggest_column(all_columns, aliases)
+        if (
+            suggestion != NOT_USED
+            and suggestion not in suggested_scientific_name_columns
+        ):
+            suggested_scientific_name_columns.append(suggestion)
 
 st.subheader("4. Match Excel columns")
+st.caption(
+    "Suggested mappings are selected automatically from common biodiversity "
+    "headings. Please check them before exporting."
+)
 
 mapping_left, mapping_middle, mapping_right = st.columns(3)
 
@@ -1904,18 +1384,35 @@ with mapping_left:
     specimen_id_column = st.selectbox(
         "Specimen ID — optional",
         optional_columns,
+        index=optional_columns.index(suggested_specimen_id),
         help=(
-            "The ID will be printed as the first line "
-            "of the collection label."
+            "Choose the catalogue or specimen number column. "
+            "Its position on the label can be configured below."
         ),
-        key="specimen_id_column",
+    )
+
+    specimen_id_placement = st.selectbox(
+        "Specimen ID placement",
+        options=[
+            "Compact — after date",
+            "Compact — after collector",
+            "Separate first line",
+            "Separate last line",
+            "Do not print",
+        ],
+        index=0,
+        disabled=specimen_id_column == NOT_USED,
+        help=(
+            "Compact placement saves one line. If the selected line is "
+            "missing, EntoLabel automatically uses the next suitable line."
+        ),
     )
 
     locality_columns = st.multiselect(
         "Location — select one or several columns",
         all_columns,
+        default=suggested_locality_columns,
         help="Example: Country + Region + Locality.",
-        key="locality_columns",
     )
 
     locality_separator_option = st.selectbox(
@@ -1927,25 +1424,24 @@ with mapping_left:
             " / ",
         ],
         index=0,
-        key="locality_separator_option",
     )
 
     latitude_column = st.selectbox(
         "Latitude — optional",
         optional_columns,
-        key="latitude_column",
+        index=optional_columns.index(suggested_latitude),
     )
 
     longitude_column = st.selectbox(
         "Longitude — optional",
         optional_columns,
-        key="longitude_column",
+        index=optional_columns.index(suggested_longitude),
     )
 
     altitude_column = st.selectbox(
         "Altitude — optional",
         optional_columns,
-        key="altitude_column",
+        index=optional_columns.index(suggested_altitude),
     )
 
 
@@ -1953,7 +1449,7 @@ with mapping_middle:
     date_column = st.selectbox(
         "Collection date",
         optional_columns,
-        key="date_column",
+        index=optional_columns.index(suggested_date),
     )
 
     date_format = st.selectbox(
@@ -1965,13 +1461,12 @@ with mapping_middle:
             "2026-07-15",
         ],
         index=0,
-        key="date_format",
     )
 
     collector_column = st.selectbox(
         "Collectors",
         optional_columns,
-        key="collector_column",
+        index=optional_columns.index(suggested_collector),
     )
 
     shorten_collector_names = st.checkbox(
@@ -1981,7 +1476,6 @@ with mapping_middle:
             "Saniya Sagutdinova becomes "
             "S. Sagutdinova."
         ),
-        key="shorten_collector_names",
     )
 
     print_coordinates = st.checkbox(
@@ -1992,7 +1486,6 @@ with mapping_middle:
             and longitude_column == NOT_USED
             and altitude_column == NOT_USED
         ),
-        key="print_coordinates",
     )
 
     coordinate_decimal_places = st.number_input(
@@ -2002,7 +1495,6 @@ with mapping_middle:
         value=4,
         step=1,
         disabled=not print_coordinates,
-        key="coordinate_decimal_places",
     )
 
     coordinate_separator = st.selectbox(
@@ -2014,7 +1506,6 @@ with mapping_middle:
         ],
         index=0,
         disabled=not print_coordinates,
-        key="coordinate_separator",
     )
 
 
@@ -2022,93 +1513,19 @@ with mapping_right:
     scientific_name_columns = st.multiselect(
         "Scientific name — select several columns",
         all_columns,
-        help="Example: Genus + Qualifier + Species.",
-        key="scientific_name_columns",
+        default=suggested_scientific_name_columns,
+        help="Example: one Taxon column, or Genus + Qualifier + Species.",
     )
 
     identifier_column = st.selectbox(
         "Identifier / determiner — optional",
         optional_columns,
-        key="identifier_column",
+        index=optional_columns.index(suggested_identifier),
     )
 
     shorten_identifier_names = st.checkbox(
         "Shorten identifier first names",
         value=True,
-        key="shorten_identifier_names",
-    )
-
-
-st.markdown("#### Optional collection details")
-
-additional_left, additional_middle, additional_right = st.columns(3)
-
-with additional_left:
-    collecting_method_column = st.selectbox(
-        "Collecting method — optional",
-        optional_columns,
-        help="Examples: sweep net, light trap, Malaise trap, hand collected.",
-        key="collecting_method_column",
-    )
-
-    habitat_column = st.selectbox(
-        "Habitat — optional",
-        optional_columns,
-        help="Example: dry calcareous grassland.",
-        key="habitat_column",
-    )
-
-with additional_middle:
-    host_column = st.selectbox(
-        "Host — optional",
-        optional_columns,
-        help="Host plant, animal, fungus, or other associated organism.",
-        key="host_column",
-    )
-
-    sex_column = st.selectbox(
-        "Sex — optional",
-        optional_columns,
-        help="Male/female values are converted to ♂/♀ when recognised.",
-        key="sex_column",
-    )
-
-with additional_right:
-    life_stage_column = st.selectbox(
-        "Life stage — optional",
-        optional_columns,
-        help="Examples: adult, larva, nymph, pupa, egg.",
-        key="life_stage_column",
-    )
-
-    additional_details_layout = st.radio(
-        "Additional details layout",
-        options=[
-            "Compact — combine fields",
-            "Separate line for each field",
-        ],
-        horizontal=False,
-        help=(
-            "Compact layout saves space. Separate lines are easier to read "
-            "but may require a taller label."
-        ),
-        key="additional_details_layout",
-    )
-
-    additional_details_separator = st.selectbox(
-        "Additional details separator",
-        options=[
-            " · ",
-            "; ",
-            ", ",
-            " / ",
-        ],
-        index=0,
-        disabled=(
-            additional_details_layout
-            == "Separate line for each field"
-        ),
-        key="additional_details_separator",
     )
 
 
@@ -2118,7 +1535,7 @@ with additional_right:
 
 st.subheader("5. Determination settings")
 
-label_output_mode = st.radio(
+labels_to_create = st.radio(
     "Labels to create",
     options=[
         "Collection + determination labels",
@@ -2126,18 +1543,13 @@ label_output_mode = st.radio(
         "Determination labels only",
     ],
     horizontal=True,
-    help=(
-        "Choose determination labels only when the specimens already "
-        "have their collection labels and have been identified later."
-    ),
-    key="label_output_mode",
 )
 
-print_collection_labels = label_output_mode in {
+create_collection_label = labels_to_create in {
     "Collection + determination labels",
     "Collection labels only",
 }
-print_determination_labels = label_output_mode in {
+create_determination_label = labels_to_create in {
     "Collection + determination labels",
     "Determination labels only",
 }
@@ -2146,14 +1558,13 @@ print_id_on_determination_label = st.checkbox(
     "Print specimen ID on determination label",
     value=False,
     disabled=(
-        not print_determination_labels
+        not create_determination_label
         or specimen_id_column == NOT_USED
     ),
     help=(
         "Uses the same specimen ID column selected "
         "for the collection label."
     ),
-    key="print_id_on_determination_label",
 )
 
 identification_year_mode = st.radio(
@@ -2164,7 +1575,6 @@ identification_year_mode = st.radio(
         "One year for all labels",
     ],
     horizontal=True,
-    key="identification_year_mode",
 )
 
 identification_year_column = NOT_USED
@@ -2174,14 +1584,12 @@ if identification_year_mode == "Column from Excel":
     identification_year_column = st.selectbox(
         "Identification year column",
         optional_columns,
-        key="identification_year_column",
     )
 
 elif identification_year_mode == "One year for all labels":
     fixed_identification_year = st.text_input(
         "Identification year",
         value=str(datetime.now().year),
-        key="fixed_identification_year",
     )
 
 
@@ -2191,58 +1599,81 @@ elif identification_year_mode == "One year for all labels":
 
 st.subheader("6. Label size and typography")
 
-if print_collection_labels:
-    st.markdown("#### Collection label")
+st.markdown("#### Collection label")
 
-    collection_settings = st.columns(4)
+collection_settings = st.columns(4)
 
-    with collection_settings[0]:
-        collection_width_mm = st.number_input(
-            "Collection width, mm",
-            min_value=10.0,
-            max_value=60.0,
-            value=20.0,
-            step=1.0,
-            key="collection_width_mm",
-        )
+with collection_settings[0]:
+    collection_width_mm = st.number_input(
+        "Collection width, mm",
+        min_value=10.0,
+        max_value=60.0,
+        value=20.0,
+        step=1.0,
+    )
 
-    with collection_settings[1]:
-        collection_height_mm = st.number_input(
-            "Collection height, mm",
-            min_value=6.0,
-            max_value=40.0,
-            value=10.0,
-            step=1.0,
-            key="collection_height_mm",
-        )
+with collection_settings[1]:
+    collection_height_mm = st.number_input(
+        "Collection height, mm",
+        min_value=6.0,
+        max_value=40.0,
+        value=10.0,
+        step=1.0,
+    )
 
-    with collection_settings[2]:
-        collection_font_size = st.number_input(
-            "Collection font, pt",
-            min_value=3.0,
-            max_value=10.0,
-            value=5.0,
-            step=0.25,
-            key="collection_font_size",
-        )
+with collection_settings[2]:
+    collection_font_size = st.number_input(
+        "Collection font, pt",
+        min_value=3.0,
+        max_value=10.0,
+        value=5.0,
+        step=0.25,
+    )
 
-    with collection_settings[3]:
-        collection_line_spacing = st.number_input(
-            "Collection line spacing",
-            min_value=0.8,
-            max_value=1.5,
-            value=1.05,
-            step=0.05,
-            key="collection_line_spacing",
-        )
-else:
-    collection_width_mm = 20.0
-    collection_height_mm = 10.0
-    collection_font_size = 5.0
-    collection_line_spacing = 1.05
+with collection_settings[3]:
+    collection_line_spacing = st.number_input(
+        "Collection line spacing",
+        min_value=0.8,
+        max_value=1.5,
+        value=1.00,
+        step=0.05,
+    )
+
+collection_layout_settings = st.columns(3)
+
+with collection_layout_settings[0]:
+    collection_auto_enlarge = st.checkbox(
+        "Use free space automatically",
+        value=True,
+        help=(
+            "EntoLabel enlarges short labels up to the selected maximum, "
+            "then shrinks only when necessary."
+        ),
+    )
+
+with collection_layout_settings[1]:
+    collection_max_font_size = st.number_input(
+        "Maximum collection font, pt",
+        min_value=3.0,
+        max_value=12.0,
+        value=6.5,
+        step=0.25,
+        disabled=not collection_auto_enlarge,
+    )
+
+with collection_layout_settings[2]:
+    collection_vertical_alignment = st.selectbox(
+        "Collection text position",
+        options=["Balanced", "Top"],
+        index=0,
+        help=(
+            "Balanced centres a short text block vertically instead of "
+            "leaving it crowded into the top-left corner."
+        ),
+    )
 
 
-if print_determination_labels:
+if create_determination_label:
     st.markdown("#### Determination label")
 
     determination_settings = st.columns(4)
@@ -2254,7 +1685,6 @@ if print_determination_labels:
             max_value=60.0,
             value=20.0,
             step=1.0,
-            key="determination_width_mm",
         )
 
     with determination_settings[1]:
@@ -2264,7 +1694,6 @@ if print_determination_labels:
             max_value=30.0,
             value=7.0,
             step=1.0,
-            key="determination_height_mm",
         )
 
     with determination_settings[2]:
@@ -2274,7 +1703,6 @@ if print_determination_labels:
             max_value=10.0,
             value=5.0,
             step=0.25,
-            key="determination_font_size",
         )
 
     with determination_settings[3]:
@@ -2282,22 +1710,48 @@ if print_determination_labels:
             "Determination line spacing",
             min_value=0.8,
             max_value=1.5,
-            value=1.05,
+            value=1.00,
             step=0.05,
-            key="determination_line_spacing",
+        )
+
+    determination_layout_settings = st.columns(3)
+
+    with determination_layout_settings[0]:
+        determination_auto_enlarge = st.checkbox(
+            "Use free space on determination labels",
+            value=True,
+        )
+
+    with determination_layout_settings[1]:
+        determination_max_font_size = st.number_input(
+            "Maximum determination font, pt",
+            min_value=3.0,
+            max_value=12.0,
+            value=6.5,
+            step=0.25,
+            disabled=not determination_auto_enlarge,
+        )
+
+    with determination_layout_settings[2]:
+        determination_vertical_alignment = st.selectbox(
+            "Determination text position",
+            options=["Balanced", "Top"],
+            index=0,
         )
 
 else:
-    determination_width_mm = 20.0
-    determination_height_mm = 7.0
-    determination_font_size = 5.0
-    determination_line_spacing = 1.05
+    determination_width_mm = collection_width_mm
+    determination_height_mm = collection_height_mm
+    determination_font_size = collection_font_size
+    determination_line_spacing = collection_line_spacing
+    determination_auto_enlarge = collection_auto_enlarge
+    determination_max_font_size = collection_max_font_size
+    determination_vertical_alignment = collection_vertical_alignment
 
 
 draw_borders = st.checkbox(
     "Draw cutting borders",
     value=True,
-    key="draw_borders",
 )
 
 
@@ -2307,20 +1761,20 @@ draw_borders = st.checkbox(
 
 st.subheader("7. Live preview")
 
-preview_excel_row = st.selectbox(
+preview_excel_row = st.number_input(
     "Preview Excel row",
-    options=selected_excel_rows,
-    index=0,
-    help="Only rows included in the selection are shown here.",
-    key="preview_excel_row",
+    min_value=int(start_excel_row),
+    max_value=int(end_excel_row),
+    value=int(start_excel_row),
+    step=1,
 )
 
-preview_position = selected_excel_rows.index(int(preview_excel_row))
-preview_row = dataframe.iloc[preview_position]
+preview_row = dataframe.iloc[int(preview_excel_row) - int(start_excel_row)]
 
 collection_preview_lines = build_collection_lines(
     row=preview_row,
     specimen_id_column=specimen_id_column,
+    specimen_id_placement=specimen_id_placement,
     locality_columns=locality_columns,
     locality_separator=locality_separator_option,
     latitude_column=latitude_column,
@@ -2333,13 +1787,6 @@ collection_preview_lines = build_collection_lines(
     date_format=date_format,
     collector_column=collector_column,
     shorten_collector_names=shorten_collector_names,
-    collecting_method_column=collecting_method_column,
-    habitat_column=habitat_column,
-    host_column=host_column,
-    sex_column=sex_column,
-    life_stage_column=life_stage_column,
-    additional_details_layout=additional_details_layout,
-    additional_details_separator=additional_details_separator,
 )
 
 determination_preview_lines = build_determination_lines(
@@ -2354,32 +1801,60 @@ determination_preview_lines = build_determination_lines(
     fixed_identification_year=fixed_identification_year,
 )
 
-preview_count = int(print_collection_labels) + int(
-    print_determination_labels
-)
-preview_columns = st.columns(preview_count)
-preview_column_index = 0
+if create_collection_label and create_determination_label:
+    preview_columns = st.columns(2)
 
-if print_collection_labels:
-    with preview_columns[preview_column_index]:
+    with preview_columns[0]:
         render_live_label(
             title="Collection label",
             lines=collection_preview_lines,
             width_mm=collection_width_mm,
             height_mm=collection_height_mm,
             font_size_pt=collection_font_size,
+            line_spacing=collection_line_spacing,
+            automatically_enlarge=collection_auto_enlarge,
+            maximum_font_size_pt=collection_max_font_size,
+            vertical_alignment=collection_vertical_alignment,
         )
-    preview_column_index += 1
 
-if print_determination_labels:
-    with preview_columns[preview_column_index]:
+    with preview_columns[1]:
         render_live_label(
             title="Determination label",
             lines=determination_preview_lines,
             width_mm=determination_width_mm,
             height_mm=determination_height_mm,
             font_size_pt=determination_font_size,
+            line_spacing=determination_line_spacing,
+            automatically_enlarge=determination_auto_enlarge,
+            maximum_font_size_pt=determination_max_font_size,
+            vertical_alignment=determination_vertical_alignment,
         )
+
+elif create_collection_label:
+    render_live_label(
+        title="Collection label",
+        lines=collection_preview_lines,
+        width_mm=collection_width_mm,
+        height_mm=collection_height_mm,
+        font_size_pt=collection_font_size,
+        line_spacing=collection_line_spacing,
+        automatically_enlarge=collection_auto_enlarge,
+        maximum_font_size_pt=collection_max_font_size,
+        vertical_alignment=collection_vertical_alignment,
+    )
+
+else:
+    render_live_label(
+        title="Determination label",
+        lines=determination_preview_lines,
+        width_mm=determination_width_mm,
+        height_mm=determination_height_mm,
+        font_size_pt=determination_font_size,
+        line_spacing=determination_line_spacing,
+        automatically_enlarge=determination_auto_enlarge,
+        maximum_font_size_pt=determination_max_font_size,
+        vertical_alignment=determination_vertical_alignment,
+    )
 
 
 # =========================================================
@@ -2396,10 +1871,15 @@ def draw_label(
     preferred_font_size: float,
     line_spacing: float,
     draw_label_border: bool,
+    automatically_enlarge: bool,
+    maximum_font_size: float,
+    vertical_alignment: str,
 ) -> bool:
-    """Draw one label and return True if all text fits."""
+    """Draw one compact label and return True if all text fits."""
 
-    inner_padding = 0.75 * mm
+    # A smaller padding is still safe for cutting, but makes much better use
+    # of tiny entomological labels.
+    inner_padding = 0.45 * mm
 
     available_width = label_width - (2 * inner_padding)
     available_height = label_height - (2 * inner_padding)
@@ -2412,6 +1892,8 @@ def draw_label(
             maximum_width=available_width,
             maximum_height=available_height,
             line_spacing=line_spacing,
+            automatically_enlarge=automatically_enlarge,
+            maximum_font_size=maximum_font_size,
         )
     )
 
@@ -2425,16 +1907,28 @@ def draw_label(
         )
 
     line_height = actual_font_size * line_spacing
-
-    text_y = (
-        y
-        + label_height
-        - inner_padding
-        - actual_font_size
+    text_block_height = (
+        actual_font_size
+        + max(len(prepared_lines) - 1, 0) * line_height
     )
 
+    if vertical_alignment == "Balanced":
+        text_y = (
+            y
+            + inner_padding
+            + ((available_height + text_block_height) / 2)
+            - actual_font_size
+        )
+    else:
+        text_y = (
+            y
+            + label_height
+            - inner_padding
+            - actual_font_size
+        )
+
     for line in prepared_lines:
-        if text_y < y + inner_padding:
+        if text_y < y + inner_padding - 0.01:
             break
 
         font_name = get_font_name(line["style"])
@@ -2462,7 +1956,7 @@ def draw_label(
 def create_pdf(
     data: pd.DataFrame,
 ) -> tuple[bytes, int]:
-    """Create an A4 PDF with the selected label types."""
+    """Create an A4 PDF with collection and determination labels."""
 
     buffer = BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=A4)
@@ -2482,10 +1976,11 @@ def create_pdf(
     label_jobs: list[dict[str, Any]] = []
 
     for _, row in data.iterrows():
-        if print_collection_labels:
+        if create_collection_label:
             collection_lines = build_collection_lines(
                 row=row,
                 specimen_id_column=specimen_id_column,
+                specimen_id_placement=specimen_id_placement,
                 locality_columns=locality_columns,
                 locality_separator=locality_separator_option,
                 latitude_column=latitude_column,
@@ -2498,13 +1993,6 @@ def create_pdf(
                 date_format=date_format,
                 collector_column=collector_column,
                 shorten_collector_names=shorten_collector_names,
-                collecting_method_column=collecting_method_column,
-                habitat_column=habitat_column,
-                host_column=host_column,
-                sex_column=sex_column,
-                life_stage_column=life_stage_column,
-                additional_details_layout=additional_details_layout,
-                additional_details_separator=additional_details_separator,
             )
 
             label_jobs.append(
@@ -2514,10 +2002,13 @@ def create_pdf(
                     "height": collection_height_mm * mm,
                     "font_size": collection_font_size,
                     "line_spacing": collection_line_spacing,
+                    "auto_enlarge": collection_auto_enlarge,
+                    "max_font_size": collection_max_font_size,
+                    "vertical_alignment": collection_vertical_alignment,
                 }
             )
 
-        if print_determination_labels:
+        if create_determination_label:
             determination_lines = build_determination_lines(
                 row=row,
                 specimen_id_column=specimen_id_column,
@@ -2537,6 +2028,9 @@ def create_pdf(
                     "height": determination_height_mm * mm,
                     "font_size": determination_font_size,
                     "line_spacing": determination_line_spacing,
+                    "auto_enlarge": determination_auto_enlarge,
+                    "max_font_size": determination_max_font_size,
+                    "vertical_alignment": determination_vertical_alignment,
                 }
             )
 
@@ -2567,6 +2061,9 @@ def create_pdf(
             preferred_font_size=job["font_size"],
             line_spacing=job["line_spacing"],
             draw_label_border=draw_borders,
+            automatically_enlarge=job["auto_enlarge"],
+            maximum_font_size=job["max_font_size"],
+            vertical_alignment=job["vertical_alignment"],
         )
 
         if not fits:
@@ -2592,24 +2089,24 @@ st.subheader("8. Export")
 
 configuration_is_valid = True
 
-if print_collection_labels and not locality_columns:
+if create_collection_label and not locality_columns:
     st.warning(
         "Select at least one location column."
     )
     configuration_is_valid = False
 
-if print_collection_labels and date_column == NOT_USED:
+if create_collection_label and date_column == NOT_USED:
     st.warning(
         "No collection-date column is selected."
     )
 
-if print_collection_labels and collector_column == NOT_USED:
+if create_collection_label and collector_column == NOT_USED:
     st.warning(
         "No collector column is selected."
     )
 
 if (
-    print_determination_labels
+    create_determination_label
     and not scientific_name_columns
 ):
     st.warning(
@@ -2633,550 +2130,16 @@ if configuration_is_valid:
             "All labels fit inside the selected dimensions."
         )
 
+    if labels_to_create == "Determination labels only":
+        pdf_filename = "determination_labels.pdf"
+    elif labels_to_create == "Collection labels only":
+        pdf_filename = "collection_labels.pdf"
+    else:
+        pdf_filename = "entomology_labels.pdf"
+
     st.download_button(
         label="📄 Create A4 PDF",
         data=pdf_bytes,
-        file_name=(
-            "determination_labels.pdf"
-            if label_output_mode == "Determination labels only"
-            else "collection_labels.pdf"
-            if label_output_mode == "Collection labels only"
-            else "entomology_labels.pdf"
-        ),
+        file_name=pdf_filename,
         mime="application/pdf",
-    )
-
-
-with st.expander(
-    "🌿 Darwin Core CSV export — optional",
-    expanded=False,
-):
-    st.caption(
-        "Advanced export for museums, collection databases, and "
-        "biodiversity-data workflows. Nothing here changes the PDF labels. "
-        "The download is a flat Simple Darwin Core CSV, not a full "
-        "Darwin Core Archive."
-    )
-
-    (
-        dwc_dataset_tab,
-        dwc_event_tab,
-        dwc_specimen_tab,
-        dwc_identification_tab,
-    ) = st.tabs(
-        [
-            "Dataset",
-            "Event & location",
-            "Specimen",
-            "Identification",
-        ]
-    )
-
-    with dwc_dataset_tab:
-        dataset_left, dataset_right = st.columns(2)
-
-        with dataset_left:
-            dwc_basis_of_record = st.selectbox(
-                "basisOfRecord",
-                options=[
-                    "PreservedSpecimen",
-                    "FossilSpecimen",
-                    "LivingSpecimen",
-                    "MaterialSample",
-                    "HumanObservation",
-                    "MachineObservation",
-                    "MaterialCitation",
-                ],
-                index=0,
-                key="dwc_basis_of_record",
-                help=(
-                    "For pinned, ethanol-preserved, slide-mounted, or other "
-                    "preserved insects, PreservedSpecimen is usually appropriate."
-                ),
-            )
-
-            dwc_occurrence_status = st.selectbox(
-                "occurrenceStatus",
-                options=[
-                    "detected",
-                    "notDetected",
-                    "",
-                ],
-                index=0,
-                key="dwc_occurrence_status",
-                format_func=lambda value: value or "Leave blank",
-            )
-
-            dwc_dataset_name = st.text_input(
-                "datasetName — optional",
-                key="dwc_dataset_name",
-                placeholder="Croatia field course 2026",
-            )
-
-            dwc_institution_code = st.text_input(
-                "institutionCode — optional",
-                key="dwc_institution_code",
-                placeholder="Institution acronym",
-            )
-
-            dwc_collection_code = st.text_input(
-                "collectionCode — optional",
-                key="dwc_collection_code",
-                placeholder="Diptera",
-            )
-
-        with dataset_right:
-            dwc_license_choice = st.selectbox(
-                "license — optional",
-                options=[
-                    "Leave blank",
-                    "CC0 1.0",
-                    "CC BY 4.0",
-                    "Custom",
-                ],
-                key="dwc_license_choice",
-                help="Choose only a licence you are authorised to apply.",
-            )
-
-            if dwc_license_choice == "CC0 1.0":
-                dwc_license = (
-                    "https://creativecommons.org/publicdomain/zero/1.0/"
-                )
-            elif dwc_license_choice == "CC BY 4.0":
-                dwc_license = (
-                    "https://creativecommons.org/licenses/by/4.0/"
-                )
-            elif dwc_license_choice == "Custom":
-                dwc_license = st.text_input(
-                    "Custom licence URL or text",
-                    key="dwc_custom_license",
-                )
-            else:
-                dwc_license = ""
-
-            dwc_rights_holder = st.text_input(
-                "rightsHolder — optional",
-                key="dwc_rights_holder",
-            )
-
-            dwc_include_empty_columns = st.checkbox(
-                "Keep completely empty Darwin Core columns",
-                value=False,
-                key="dwc_include_empty_columns",
-                help=(
-                    "Normally EntoLabel removes fields that are empty for "
-                    "every selected record."
-                ),
-            )
-
-    with dwc_event_tab:
-        event_left, event_middle, event_right = st.columns(3)
-
-        with event_left:
-            dwc_event_date_column = st.selectbox(
-                "eventDate column",
-                optional_columns,
-                index=option_index(optional_columns, date_column),
-                key="dwc_event_date_column",
-                help="Dates are converted to ISO format when possible.",
-            )
-
-            dwc_recorded_by_column = st.selectbox(
-                "recordedBy column",
-                optional_columns,
-                index=option_index(optional_columns, collector_column),
-                key="dwc_recorded_by_column",
-            )
-
-            dwc_sampling_protocol_column = st.selectbox(
-                "samplingProtocol column",
-                optional_columns,
-                index=option_index(
-                    optional_columns,
-                    collecting_method_column,
-                ),
-                key="dwc_sampling_protocol_column",
-            )
-
-            dwc_habitat_column = st.selectbox(
-                "habitat column",
-                optional_columns,
-                index=option_index(optional_columns, habitat_column),
-                key="dwc_habitat_column",
-            )
-
-        with event_middle:
-            dwc_country_column = st.selectbox(
-                "country column — optional",
-                optional_columns,
-                key="dwc_country_column",
-            )
-
-            dwc_country_code_column = st.selectbox(
-                "countryCode column — optional",
-                optional_columns,
-                key="dwc_country_code_column",
-                help="Prefer a two-letter ISO country code when available.",
-            )
-
-            dwc_state_province_column = st.selectbox(
-                "stateProvince column — optional",
-                optional_columns,
-                key="dwc_state_province_column",
-            )
-
-            dwc_county_column = st.selectbox(
-                "county column — optional",
-                optional_columns,
-                key="dwc_county_column",
-            )
-
-            dwc_municipality_column = st.selectbox(
-                "municipality column — optional",
-                optional_columns,
-                key="dwc_municipality_column",
-            )
-
-        with event_right:
-            dwc_locality_columns = st.multiselect(
-                "locality — select one or several columns",
-                all_columns,
-                default=[
-                    column
-                    for column in locality_columns
-                    if column in all_columns
-                ],
-                key="dwc_locality_columns",
-            )
-
-            dwc_locality_separator = st.selectbox(
-                "Locality separator",
-                options=[
-                    ", ",
-                    " | ",
-                    " · ",
-                    " / ",
-                ],
-                index=0,
-                key="dwc_locality_separator",
-            )
-
-            dwc_latitude_column = st.selectbox(
-                "decimalLatitude column",
-                optional_columns,
-                index=option_index(optional_columns, latitude_column),
-                key="dwc_latitude_column",
-            )
-
-            dwc_longitude_column = st.selectbox(
-                "decimalLongitude column",
-                optional_columns,
-                index=option_index(optional_columns, longitude_column),
-                key="dwc_longitude_column",
-            )
-
-            dwc_elevation_column = st.selectbox(
-                "Elevation column",
-                optional_columns,
-                index=option_index(optional_columns, altitude_column),
-                key="dwc_elevation_column",
-                help=(
-                    "The same numeric value is exported as minimum and "
-                    "maximum elevation, while the original value is kept "
-                    "as verbatimElevation."
-                ),
-            )
-
-            dwc_geodetic_datum = st.text_input(
-                "geodeticDatum — optional",
-                key="dwc_geodetic_datum",
-                placeholder="WGS84",
-                help="Fill this only when the coordinate datum is known.",
-            )
-
-            dwc_coordinate_uncertainty_column = st.selectbox(
-                "coordinateUncertaintyInMeters column — optional",
-                optional_columns,
-                key="dwc_coordinate_uncertainty_column",
-            )
-
-    with dwc_specimen_tab:
-        specimen_left, specimen_right = st.columns(2)
-
-        with specimen_left:
-            dwc_catalog_number_column = st.selectbox(
-                "catalogNumber column",
-                optional_columns,
-                index=option_index(optional_columns, specimen_id_column),
-                key="dwc_catalog_number_column",
-                help=(
-                    "This normally uses the same specimen ID selected for "
-                    "the label."
-                ),
-            )
-
-            dwc_occurrence_id_mode = st.selectbox(
-                "occurrenceID",
-                options=[
-                    "Leave blank",
-                    "Use an Excel column",
-                    "Prefix + catalogNumber",
-                    "Use catalogNumber directly",
-                ],
-                key="dwc_occurrence_id_mode",
-                help=(
-                    "A stable globally unique occurrenceID is recommended "
-                    "for publication. A local catalogNumber alone may not be "
-                    "globally unique."
-                ),
-            )
-
-            dwc_occurrence_id_column = NOT_USED
-            dwc_occurrence_id_prefix = ""
-
-            if dwc_occurrence_id_mode == "Use an Excel column":
-                dwc_occurrence_id_column = st.selectbox(
-                    "occurrenceID column",
-                    optional_columns,
-                    key="dwc_occurrence_id_column",
-                )
-
-            elif dwc_occurrence_id_mode == "Prefix + catalogNumber":
-                dwc_occurrence_id_prefix = st.text_input(
-                    "Stable prefix",
-                    key="dwc_occurrence_id_prefix",
-                    placeholder="https://example.org/specimens/",
-                )
-
-            dwc_record_number_column = st.selectbox(
-                "recordNumber column — optional",
-                optional_columns,
-                key="dwc_record_number_column",
-                help="A collector's field number, when different from catalogNumber.",
-            )
-
-            dwc_individual_count_column = st.selectbox(
-                "individualCount column — optional",
-                optional_columns,
-                key="dwc_individual_count_column",
-            )
-
-        with specimen_right:
-            dwc_sex_column = st.selectbox(
-                "sex column",
-                optional_columns,
-                index=option_index(optional_columns, sex_column),
-                key="dwc_sex_column",
-            )
-
-            dwc_life_stage_column = st.selectbox(
-                "lifeStage column",
-                optional_columns,
-                index=option_index(optional_columns, life_stage_column),
-                key="dwc_life_stage_column",
-            )
-
-            dwc_host_column = st.selectbox(
-                "Host column → associatedTaxa",
-                optional_columns,
-                index=option_index(optional_columns, host_column),
-                key="dwc_host_column",
-                help=(
-                    "A host such as Quercus robur is exported as "
-                    '"host":"Quercus robur".'
-                ),
-            )
-
-            dwc_preparations_column = st.selectbox(
-                "preparations column — optional",
-                optional_columns,
-                key="dwc_preparations_column",
-                help="Examples: pinned, ethanol 96%, slide-mounted.",
-            )
-
-            dwc_occurrence_remarks_column = st.selectbox(
-                "occurrenceRemarks column — optional",
-                optional_columns,
-                key="dwc_occurrence_remarks_column",
-            )
-
-    with dwc_identification_tab:
-        identification_left, identification_right = st.columns(2)
-
-        with identification_left:
-            dwc_scientific_name_columns = st.multiselect(
-                "scientificName — select one or several columns",
-                all_columns,
-                default=[
-                    column
-                    for column in scientific_name_columns
-                    if column in all_columns
-                ],
-                key="dwc_scientific_name_columns",
-            )
-
-            dwc_identified_by_column = st.selectbox(
-                "identifiedBy column",
-                optional_columns,
-                index=option_index(optional_columns, identifier_column),
-                key="dwc_identified_by_column",
-            )
-
-            dwc_identification_date_mode = st.selectbox(
-                "dateIdentified",
-                options=[
-                    "Use current determination settings",
-                    "Use an Excel column",
-                    "Leave blank",
-                ],
-                key="dwc_identification_date_mode",
-            )
-
-            dwc_identification_date_column = NOT_USED
-
-            if dwc_identification_date_mode == "Use an Excel column":
-                dwc_identification_date_column = st.selectbox(
-                    "dateIdentified column",
-                    optional_columns,
-                    key="dwc_identification_date_column",
-                )
-
-        with identification_right:
-            dwc_identification_qualifier_column = st.selectbox(
-                "identificationQualifier column — optional",
-                optional_columns,
-                key="dwc_identification_qualifier_column",
-                help="Examples: cf., aff., ?, sensu lato.",
-            )
-
-            dwc_taxon_rank_column = st.selectbox(
-                "taxonRank column — optional",
-                optional_columns,
-                key="dwc_taxon_rank_column",
-                help="Examples: species, genus, family.",
-            )
-
-    darwin_core_settings = {
-        "basis_of_record": dwc_basis_of_record,
-        "occurrence_status": dwc_occurrence_status,
-        "dataset_name": dwc_dataset_name,
-        "institution_code": dwc_institution_code,
-        "collection_code": dwc_collection_code,
-        "license": dwc_license,
-        "rights_holder": dwc_rights_holder,
-        "include_empty_columns": dwc_include_empty_columns,
-        "event_date_column": dwc_event_date_column,
-        "recorded_by_column": dwc_recorded_by_column,
-        "sampling_protocol_column": dwc_sampling_protocol_column,
-        "habitat_column": dwc_habitat_column,
-        "country_column": dwc_country_column,
-        "country_code_column": dwc_country_code_column,
-        "state_province_column": dwc_state_province_column,
-        "county_column": dwc_county_column,
-        "municipality_column": dwc_municipality_column,
-        "locality_columns": dwc_locality_columns,
-        "locality_separator": dwc_locality_separator,
-        "latitude_column": dwc_latitude_column,
-        "longitude_column": dwc_longitude_column,
-        "elevation_column": dwc_elevation_column,
-        "geodetic_datum": dwc_geodetic_datum,
-        "coordinate_uncertainty_column": (
-            dwc_coordinate_uncertainty_column
-        ),
-        "catalog_number_column": dwc_catalog_number_column,
-        "occurrence_id_mode": dwc_occurrence_id_mode,
-        "occurrence_id_column": dwc_occurrence_id_column,
-        "occurrence_id_prefix": dwc_occurrence_id_prefix,
-        "record_number_column": dwc_record_number_column,
-        "individual_count_column": dwc_individual_count_column,
-        "sex_column": dwc_sex_column,
-        "life_stage_column": dwc_life_stage_column,
-        "host_column": dwc_host_column,
-        "preparations_column": dwc_preparations_column,
-        "occurrence_remarks_column": dwc_occurrence_remarks_column,
-        "scientific_name_columns": dwc_scientific_name_columns,
-        "identified_by_column": dwc_identified_by_column,
-        "identification_date_mode": dwc_identification_date_mode,
-        "identification_date_column": dwc_identification_date_column,
-        "identification_qualifier_column": (
-            dwc_identification_qualifier_column
-        ),
-        "taxon_rank_column": dwc_taxon_rank_column,
-        "current_identification_year_mode": identification_year_mode,
-        "current_identification_year_column": identification_year_column,
-        "current_fixed_identification_year": fixed_identification_year,
-    }
-
-    darwin_core_dataframe = create_darwin_core_dataframe(
-        data=dataframe,
-        settings=darwin_core_settings,
-    )
-
-    st.markdown("#### Export check")
-    st.caption(
-        f"{len(darwin_core_dataframe)} record(s) · "
-        f"{len(darwin_core_dataframe.columns)} Darwin Core field(s)"
-    )
-
-    for message_type, message_text in darwin_core_validation_messages(
-        darwin_core_dataframe
-    ):
-        if message_type == "warning":
-            st.warning(message_text)
-        else:
-            st.info(message_text)
-
-    show_dwc_preview = st.checkbox(
-        "Show Darwin Core preview",
-        value=False,
-        key="show_dwc_preview",
-    )
-
-    if show_dwc_preview:
-        st.dataframe(
-            darwin_core_dataframe.head(20).astype(str),
-            width="stretch",
-        )
-
-    darwin_core_csv = darwin_core_dataframe.to_csv(
-        index=False,
-        lineterminator="\n",
-    ).encode("utf-8-sig")
-
-    st.download_button(
-        label="🌿 Download Darwin Core CSV",
-        data=darwin_core_csv,
-        file_name="entolabel_darwin_core.csv",
-        mime="text/csv",
-        key="download_darwin_core_csv",
-    )
-
-# =========================================================
-# SAVE PRESET
-# =========================================================
-
-with st.expander("💾 Save these settings as a preset", expanded=False):
-    st.caption(
-        "Download a small JSON file and upload it next time. The preset "
-        "stores settings and column names only — never specimen records."
-    )
-    preset_name = st.text_input(
-        "Preset name",
-        value="EntoLabel_preset",
-        key="preset_name",
-    ).strip() or "EntoLabel_preset"
-    safe_preset_name = "".join(
-        character if character.isalnum() or character in "-_" else "_"
-        for character in preset_name
-    ).strip("_") or "EntoLabel_preset"
-    preset_json = json.dumps(
-        build_preset_payload(), ensure_ascii=False, indent=2
-    ).encode("utf-8")
-    st.download_button(
-        label="⬇️ Download preset",
-        data=preset_json,
-        file_name=f"{safe_preset_name}.json",
-        mime="application/json",
-        key="download_preset_button",
-        use_container_width=True,
     )
